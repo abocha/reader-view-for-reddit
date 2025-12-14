@@ -13,6 +13,7 @@ async function build() {
     await copy('src/pages', 'dist/pages', {
         filter: (src) => !src.endsWith('.ts') // Don't copy usage sources
     });
+    await copy('src/icons', 'dist/icons');
 
     // Bundle TS
     const context = await _context({

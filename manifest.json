@@ -28,7 +28,10 @@
         "menus"
     ],
     "action": {
-        "default_title": "Open Spike Article"
+        "default_title": "Open Reader View",
+        "default_icon": {
+            "48": "icons/icon.svg"
+        }
     },
     "commands": {
         "open-reader-view": {
