@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Reader View</title>
+    <style>
+        :root {
+            --bg-color: #ffffff;
+            --text-color: #333333;
+            --link-color: #0060df;
+            --meta-color: #666666;
+            --font-family: "Georgia", "Times New Roman", Times, serif;
+        }
+
+        /* Typography Presets */
+        body.font-serif {
+            --font-family: "Georgia", "Times New Roman", Times, serif;
+        }
+
+        body.font-sans {
+            --font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+        }
+
+        body.font-modern {
+            --font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        /* Alignment Presets */
+        body.align-left p {
+            text-align: left;
+        }
+
+        body.align-center p {
+            text-align: center;
+        }
+
+        body.align-right p {
+            text-align: right;
+        }
+
+        body.align-justify p {
+            text-align: justify;
+        }
+
+        /* Themes */
+        body.theme-dark {
+            --bg-color: #2b2a33;
+            --text-color: #eeeeee;
+            --link-color: #45a1ff;
+            --meta-color: #aaaaaa;
+        }
+
+        body.theme-sepia {
+            --bg-color: #f4ecd8;
+            --text-color: #5b4636;
+            --link-color: #2c5871;
+            --meta-color: #8c7664;
+        }
+
+        body.theme-solarized {
+            --bg-color: #fdf6e3;
+            --text-color: #657b83;
+            --link-color: #268bd2;
+            --meta-color: #93a1a1;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: var(--font-family);
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        main {
+            max-width: 700px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        /* Typography */
+        h1 {
+            font-size: 2.2em;
+            line-height: 1.2;
+            margin-bottom: 0.5em;
+        }
+
+        h2 {
+            font-size: 1.6em;
+            margin-top: 1.5em;
+        }
+
+        h3 {
+            font-size: 1.3em;
+            margin-top: 1.2em;
+        }
+
+        p {
+            margin-bottom: 1.2em;
+            font-size: 1.125em;
+        }
+
+        a {
+            color: var(--link-color);
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 4px;
+            display: block;
+            margin: 20px 0;
+        }
+
+        blockquote {
+            border-left: 4px solid var(--meta-color);
+            margin: 0;
+            padding-left: 15px;
+            font-style: italic;
+            color: var(--meta-color);
+        }
+
+        pre,
+        code {
+            font-family: monospace;
+            background: rgba(125, 125, 125, 0.1);
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+
+        pre {
+            padding: 15px;
+            overflow-x: auto;
+        }
+
+        /* Toolbar */
+        #reader-toolbar {
+            position: fixed;
+            top: 0;
+            right: 0;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            border-bottom-left-radius: 8px;
+            box-shadow: -2px 2px 10px rgba(0, 0, 0, 0.1);
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            z-index: 100;
+        }
+
+        body.theme-dark #reader-toolbar {
+            background: rgba(43, 42, 51, 0.9);
+            box-shadow: -2px 2px 10px rgba(0, 0, 0, 0.5);
+        }
+
+        body.theme-sepia #reader-toolbar {
+            background: rgba(244, 236, 216, 0.9);
+        }
+
+        .toolbar-group {
+            display: flex;
+            gap: 8px;
+            border-right: 1px solid rgba(125, 125, 125, 0.3);
+            padding-right: 15px;
+        }
+
+        .toolbar-group:last-child {
+            border-right: none;
+            padding-right: 0;
+        }
+
+        .theme-btn {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            border: 2px solid rgba(125, 125, 125, 0.3);
+            cursor: pointer;
+        }
+
+        .theme-btn:hover {
+            transform: scale(1.1);
+        }
+
+        .theme-btn.active {
+            border-color: var(--link-color);
+            transform: scale(1.1);
+        }
+
+        .font-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            color: var(--meta-color);
+            font-weight: bold;
+            padding: 4px;
+            border-radius: 4px;
+        }
+
+        .font-btn:hover {
+            color: var(--link-color);
+            background: rgba(125, 125, 125, 0.1);
+        }
+
+        .font-btn.active {
+            color: var(--link-color);
+            text-decoration: underline;
+        }
+
+        .align-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            color: var(--meta-color);
+            padding: 2px 5px;
+            border-radius: 4px;
+        }
+
+        .align-btn:hover {
+            color: var(--link-color);
+            background: rgba(125, 125, 125, 0.1);
+        }
+
+        .align-btn.active {
+            color: var(--link-color);
+            background: rgba(125, 125, 125, 0.15);
+        }
+    </style>
+</head>
+
+<body>
+    <div id="reader-toolbar">
+        <div class="toolbar-group">
+            <button class="font-btn" data-font="serif" style="font-family: Georgia, serif;">Serif</button>
+            <button class="font-btn" data-font="sans" style="font-family: Helvetica, Arial, sans-serif;">Sans</button>
+            <button class="font-btn" data-font="modern" style="font-family: system-ui, sans-serif;">Modern</button>
+        </div>
+        <div class="toolbar-group">
+            <button class="align-btn" data-align="left" title="Align Left">⫷</button>
+            <button class="align-btn" data-align="center" title="Align Center">≡</button>
+            <button class="align-btn" data-align="justify" title="Justify">≣</button>
+            <button class="align-btn" data-align="right" title="Align Right">⫸</button>
+        </div>
+        <div class="toolbar-group">
+            <button class="theme-btn" data-theme="light" style="background: #ffffff;" title="Light"></button>
+            <button class="theme-btn" data-theme="sepia" style="background: #f4ecd8;" title="Sepia"></button>
+            <button class="theme-btn" data-theme="dark" style="background: #2b2a33;" title="Dark"></button>
+            <button class="theme-btn" data-theme="solarized" style="background: #fdf6e3;" title="Solarized"></button>
+        </div>
+    </div>
+    <main>
+        <article id="spike-article">
+            <h1>Loading Reddit Reader Content...</h1>
+            <p>Please wait while we extract and sanitize the content from the Reddit post.</p>
+        </article>
+    </main>
+    <script src="reader-host.js"></script>
+</body>
+
+</html>
