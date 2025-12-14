@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Reader View for Reddit",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "Spike to validate Reader Mode toggling on extension pages",
     "browser_specific_settings": {
         "gecko": {
