@@ -1,6 +1,5 @@
 import { context as _context } from 'esbuild';
 import { emptyDir, copy } from 'fs-extra';
-import path from 'path';
 
 const isDev = process.argv.includes('--dev');
 

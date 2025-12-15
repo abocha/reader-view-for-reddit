@@ -1,8 +1,5 @@
 import browser, { Tabs } from 'webextension-polyfill';
-import type { Runtime } from 'webextension-polyfill';
 import { extractRedditPost, ExtractionResult } from '../content/reddit-extract';
-
-// Use a Set to track tabs we are currently processing for Reader Mode toggle -> Logic removed.
 
 // --- Core Logic ---
 
@@ -50,12 +47,10 @@ async function processTab(tab: Tabs.Tab) {
 
 async function openHostPage(token: string) {
     const hostUrl = browser.runtime.getURL('pages/reader-host.html') + `#token=${token}`;
-    const newTab = await browser.tabs.create({
+    await browser.tabs.create({
         url: hostUrl,
         active: true
     });
-
-    // pendingTabs.add(newTab.id!); // Removed -> Cleaned up
 }
 
 async function openErrorHost(sourceTab: Tabs.Tab, errorMsg: string) {
@@ -70,7 +65,6 @@ async function openErrorHost(sourceTab: Tabs.Tab, errorMsg: string) {
         url: hostUrl,
         active: true
     });
-    // We don't add to pendingTabs because we don't expect Reader Mode to work on the error page
 }
 
 // --- Listeners ---
@@ -106,19 +100,5 @@ browser.runtime.onInstalled.addListener(async () => {
 browser.menus.onClicked.addListener((info, tab) => {
     if (info.menuItemId === "open-reddit-reader" && tab) {
         processTab(tab);
-    }
-});
-
-
-// --- Reader Mode Toggle Logic (Removed due to Platform Limitation) ---
-browser.runtime.onMessage.addListener(async (message: unknown, sender: Runtime.MessageSender) => {
-    // We can still listen for "Ready" signals for logging, but no action is needed.
-    if (
-        typeof message === 'object' &&
-        message !== null &&
-        'type' in message &&
-        (message as { type?: unknown }).type === 'READER_CONTENT_READY'
-    ) {
-        console.log('[Reader Helper] Host page ready:', sender.tab?.id);
     }
 });
