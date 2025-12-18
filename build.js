@@ -18,7 +18,7 @@ async function build() {
     const context = await _context({
         entryPoints: {
             'background': 'src/background/index.ts',
-            'pages/reader-host': 'src/pages/reader-host.ts'
+            'pages/reader-host': 'src/pages/reader-host.ts',
         },
         bundle: true,
         outdir: 'dist',

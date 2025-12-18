@@ -1,0 +1,178 @@
+/* Reset & Base */
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+body {
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    font-family: var(--font-family, serif);
+    line-height: 1.6;
+    margin: 0;
+    padding: 0;
+    transition: background-color var(--transition-normal), color var(--transition-normal);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+    background: var(--selection-bg);
+}
+
+/* Typography presets (reading) */
+body.font-serif {
+    --font-family: "Georgia", "Cambria", "Times New Roman", Times, serif;
+}
+
+body.font-sans {
+    --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+body.font-modern {
+    --font-family: "Inter", system-ui, -apple-system, sans-serif;
+    letter-spacing: -0.01em;
+}
+
+/* Layout */
+main {
+    max-width: var(--content-width);
+    margin: 0 auto;
+    padding:
+        calc(var(--spacing-xl) + var(--toolbar-offset-top))
+        var(--spacing-md)
+        calc(var(--spacing-xl) + var(--toolbar-offset-bottom));
+    position: relative;
+    z-index: 1;
+}
+
+/* Typography */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+    line-height: 1.3;
+    margin-top: 2em;
+    margin-bottom: 0.75em;
+    font-weight: 700;
+    color: var(--text-color);
+}
+
+h1 {
+    font-size: var(--font-size-3xl);
+    margin-top: 0;
+    letter-spacing: -0.02em;
+}
+
+h2 {
+    font-size: var(--font-size-2xl);
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid var(--border-color);
+}
+
+h3 {
+    font-size: var(--font-size-xl);
+}
+
+p {
+    margin-bottom: 1.5em;
+    font-size: var(--font-size-base);
+    max-width: var(--content-width);
+}
+
+a {
+    color: var(--link-color);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    transition: border-color var(--transition-fast);
+}
+
+a:hover {
+    border-bottom-color: var(--link-color);
+}
+
+img,
+video {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    display: block;
+    margin: var(--spacing-lg) 0;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+blockquote {
+    border-left: 4px solid var(--accent-color);
+    margin: 1.5em 0;
+    padding: 0.5em 0 0.5em 1.5em;
+    font-style: italic;
+    color: var(--meta-color);
+    background: rgba(125, 125, 125, 0.03);
+    border-radius: 0 8px 8px 0;
+}
+
+pre,
+code {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.9em;
+}
+
+code {
+    background: var(--border-color);
+    padding: 0.2em 0.4em;
+    border-radius: 4px;
+}
+
+pre {
+    background: rgba(125, 125, 125, 0.05);
+    padding: var(--spacing-md);
+    border-radius: 8px;
+    overflow-x: auto;
+    border: 1px solid var(--border-color);
+}
+
+/* Alignment utilities (applied to body) */
+.align-left main,
+.align-left .content,
+.align-left p,
+.align-left h1,
+.align-left h2,
+.align-left h3,
+.align-left h4,
+.align-left h5,
+.align-left h6 {
+    text-align: left;
+}
+
+.align-center main,
+.align-center .content,
+.align-center p,
+.align-center h1,
+.align-center h2,
+.align-center h3,
+.align-center h4,
+.align-center h5,
+.align-center h6 {
+    text-align: center;
+}
+
+.align-right main,
+.align-right .content,
+.align-right p,
+.align-right h1,
+.align-right h2,
+.align-right h3,
+.align-right h4,
+.align-right h5,
+.align-right h6 {
+    text-align: right;
+}
+
+.align-justify main,
+.align-justify .content,
+.align-justify p {
+    text-align: justify;
+}

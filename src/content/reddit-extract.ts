@@ -3,10 +3,19 @@ export interface RedditPostPayload {
     author: string;
     subreddit: string;
     bodyHtml: string;
+    bodyMarkdown: string;
     isFallback: boolean;
     url: string;
     linkUrl?: string; // For link posts
     thumbnail?: string;
+    permalink?: string;
+    postId?: string;
+    media?: {
+        type: 'image' | 'gallery' | 'video';
+        url: string;
+        thumbnailUrl?: string;
+        galleryCount?: number;
+    };
 }
 
 export type ExtractionResult =
@@ -26,6 +35,27 @@ export async function extractRedditPost(): Promise<ExtractionResult> {
         // Remove Reddit specific comment markers
         decoded = decoded.replace(/<!-- SC_OFF -->/g, '').replace(/<!-- SC_ON -->/g, '');
         return decoded;
+    };
+
+    const escapeHtml = (value: string): string =>
+        value
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+
+    const normalizeUrl = (value: string): string => value.replace(/&amp;/g, '&');
+
+    const tryHttpUrl = (value: string | undefined | null): string | null => {
+        if (!value) return null;
+        try {
+            const url = new URL(normalizeUrl(value));
+            if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+            return url.toString();
+        } catch {
+            return null;
+        }
     };
 
     try {
@@ -54,12 +84,62 @@ export async function extractRedditPost(): Promise<ExtractionResult> {
                 const finalPost = isCrosspost ? initialPost.crosspost_parent_list[0] : initialPost;
 
                 // Prefer selftext_html, fallback to selftext
-                let bodyHtml = finalPost.selftext_html || finalPost.selftext || '';
+                const bodyMarkdown = finalPost.selftext || '';
+                let bodyHtml = finalPost.selftext_html || '';
+                if (!bodyHtml && bodyMarkdown) {
+                    bodyHtml = `<pre>${escapeHtml(bodyMarkdown)}</pre>`;
+                }
                 bodyHtml = cleanRedditHtml(bodyHtml);
 
                 const subreddit = isCrosspost
                     ? `${initialPost.subreddit_name_prefixed} 🔀 ${finalPost.subreddit_name_prefixed}`
                     : initialPost.subreddit_name_prefixed;
+
+                let media: RedditPostPayload['media'] = undefined;
+
+                // Gallery (use first item for preview)
+                if (finalPost.is_gallery && finalPost.gallery_data?.items && finalPost.media_metadata) {
+                    const items = finalPost.gallery_data.items as Array<{ media_id?: string }>;
+                    const firstId = items?.[0]?.media_id;
+                    const first = firstId ? finalPost.media_metadata[firstId] : null;
+                    const firstUrl = tryHttpUrl(first?.s?.u);
+                    const firstThumb = tryHttpUrl(first?.p?.[0]?.u);
+                    if (firstUrl) {
+                        media = {
+                            type: 'gallery',
+                            url: firstUrl,
+                            thumbnailUrl: firstThumb || undefined,
+                            galleryCount: items?.length || undefined,
+                        };
+                    }
+                }
+
+                // Video (link to Reddit-hosted fallback url)
+                if (!media && finalPost.is_video) {
+                    const videoUrl =
+                        tryHttpUrl(finalPost.secure_media?.reddit_video?.fallback_url) ||
+                        tryHttpUrl(finalPost.media?.reddit_video?.fallback_url);
+                    if (videoUrl) {
+                        media = { type: 'video', url: videoUrl };
+                    }
+                }
+
+                // Image (prefer preview/source and fallback to overridden url)
+                if (!media) {
+                    const previewUrl =
+                        tryHttpUrl(finalPost.preview?.images?.[0]?.source?.url) ||
+                        tryHttpUrl(finalPost.url_overridden_by_dest);
+                    const previewThumb =
+                        tryHttpUrl(finalPost.preview?.images?.[0]?.resolutions?.[0]?.url) ||
+                        tryHttpUrl(finalPost.thumbnail);
+                    if (previewUrl && (finalPost.post_hint === 'image' || finalPost.preview?.images?.length)) {
+                        media = {
+                            type: 'image',
+                            url: previewUrl,
+                            thumbnailUrl: previewThumb || undefined,
+                        };
+                    }
+                }
 
                 return {
                     ok: true,
@@ -68,10 +148,14 @@ export async function extractRedditPost(): Promise<ExtractionResult> {
                         author: initialPost.author || 'unknown',
                         subreddit: subreddit || "r/reddit",
                         bodyHtml: bodyHtml,
+                        bodyMarkdown: bodyMarkdown,
                         isFallback: false,
                         url: loc.href,
                         linkUrl: finalPost.url_overridden_by_dest, // External link
-                        thumbnail: finalPost.thumbnail // 'default', 'self', or URL
+                        thumbnail: finalPost.thumbnail, // 'default', 'self', or URL
+                        permalink: finalPost.permalink,
+                        postId: finalPost.id,
+                        media,
                     }
                 };
             }
@@ -114,6 +198,7 @@ export async function extractRedditPost(): Promise<ExtractionResult> {
                 author: 'unknown', // Hard to unreliable extract from DOM consistently
                 subreddit: 'r/reddit',
                 bodyHtml: bodyHtml,
+                bodyMarkdown: '',
                 isFallback: true,
                 url: loc.href
             }

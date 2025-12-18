@@ -1,6 +1,27 @@
 # Reader View for Reddit
 
-Firefox extension to open Reddit posts in a dedicated “reader view” page, as the native Firefox Reader View feature does not currently support Reddit.
+Firefox extension that opens Reddit posts in a clean, distraction-free Reader View page (native Firefox Reader View doesn’t support Reddit well).
+
+## Usage
+
+- **Open Reader View**
+  - Click the extension icon, or use the keyboard shortcut (default: `Alt+Shift+R`).
+  - Right-click on a Reddit post page → `Read in Reader View`.
+  - Right-click a Reddit post link → `Open link in Reader View` (useful from feeds).
+- **Settings (in Reader View)**
+  - Theme, font, and alignment toggles.
+  - Open mode: same tab vs new tab.
+- **Copy**
+  - Copy post as Markdown, or post + comments as Markdown.
+- **Comments**
+  - Default limit is `100` (configurable up to `500`).
+  - “Load more comments” increases the limit in steps (keeps scroll position).
+  - When Reddit indicates there are more than we can load, the footer offers a link to “See more comments on Reddit”.
+
+## Notes / Limitations
+
+- Works on Reddit post URLs (`/comments/...`).
+- Comments are fetched from Reddit’s JSON listing endpoint, which tops out around ~500 and uses `"more"` placeholders; loading full 1000+ threads would require implementing `morechildren`.
 
 ## Development
 

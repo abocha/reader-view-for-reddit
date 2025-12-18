@@ -1,22 +1,23 @@
 {
   "name": "reader-view-for-reddit",
-  "version": "1.0.2",
+  "version": "2.0.0",
   "description": "",
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "build": "node build.js",
     "dev": "node build.js --dev",
     "typecheck": "tsc -p tsconfig.json",
     "start:firefox": "MOZ_ENABLE_WAYLAND=0 web-ext run --source-dir dist --target firefox-desktop",
     "start:firefox:verbose": "MOZ_ENABLE_WAYLAND=0 web-ext run --source-dir dist --target firefox-desktop --verbose",
-    "package": "web-ext build --source-dir dist --overwrite-dest"
+    "package": "web-ext build --source-dir dist --overwrite-dest",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "packageManager": "pnpm@10.25.0",
+  "packageManager": "pnpm@10.26.0+sha512.3b3f6c725ebe712506c0ab1ad4133cf86b1f4b687effce62a9b38b4d72e3954242e643190fc51fa1642949c735f403debd44f5cb0edd657abe63a8b6a7e1e402",
   "engines": {
     "node": ">=22"
   },
@@ -24,11 +25,13 @@
     "@types/firefox-webext-browser": "^143.0.0",
     "@types/fs-extra": "^11.0.4",
     "@types/webextension-polyfill": "^0.12.4",
-    "esbuild": "^0.27.1",
+    "@vitest/coverage-v8": "^4.0.16",
+    "esbuild": "^0.27.2",
     "fs-extra": "^11.3.2",
+    "happy-dom": "^20.0.11",
     "typescript": "^5.9.3",
+    "vitest": "^4.0.16",
     "web-ext": "^9.2.0",
     "webextension-polyfill": "^0.12.0"
-  },
-  "dependencies": {}
+  }
 }

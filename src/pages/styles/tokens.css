@@ -1,0 +1,181 @@
+:root {
+    /* Layout */
+    --content-width: 70ch;
+    --toolbar-width: 260px;
+    --toolbar-offset-top: 0px; /* Dynamic */
+    --toolbar-offset-bottom: 0px; /* Dynamic */
+
+    /* Spacing scale */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+    --space-6: 32px;
+    --space-7: 40px;
+    --space-8: 48px;
+
+    /* Legacy spacing aliases (content rules currently use these) */
+    --spacing-xs: var(--space-1);
+    --spacing-sm: var(--space-2);
+    --spacing-md: var(--space-4);
+    --spacing-lg: var(--space-5);
+    --spacing-xl: var(--space-7);
+
+    /* Radius */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-pill: 999px;
+
+    /* Shadows */
+    --shadow-1: 0 2px 10px rgba(0, 0, 0, 0.08);
+    --shadow-2: 0 8px 32px rgba(0, 0, 0, 0.12);
+    --shadow-popup: var(--shadow-2);
+
+    /* Motion */
+    --dur-1: 150ms;
+    --dur-2: 300ms;
+    --dur-3: 450ms;
+    --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+    --ease-emphasized: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+    /* Legacy transition aliases */
+    --transition-fast: var(--dur-1) var(--ease-standard);
+    --transition-normal: var(--dur-2) var(--ease-standard);
+    --transition-slow: var(--dur-3) var(--ease-standard);
+
+    /* Typography scale (content) */
+    --font-size-base: 18px;
+    --font-size-lg: 1.125em;
+    --font-size-xl: 1.3em;
+    --font-size-2xl: 1.6em;
+    --font-size-3xl: 2.2em;
+
+    /* Typography (UI) */
+    --ui-font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --ui-font-size-sm: 13px;
+    --ui-font-size-md: 14px;
+    --ui-font-weight: 600;
+    --ui-line-height: 1.2;
+
+    /* Theme: Light (default) */
+    --bg-color: #F9F9F9;
+    --text-color: #222222;
+    --link-color: #0060df;
+    --meta-color: #666666;
+    --border-color: rgba(0, 0, 0, 0.1);
+    --accent-color: #0060df;
+    --selection-bg: rgba(0, 96, 223, 0.2);
+    --focus-ring: rgba(0, 96, 223, 0.45);
+
+    /* System contract (preferred tokens) */
+    --surface-0: var(--bg-color);
+    --surface-1: rgba(255, 255, 255, 0.75);
+    --surface-2: rgba(255, 255, 255, 0.92);
+    --text-1: var(--text-color);
+    --text-2: var(--meta-color);
+    --border-1: var(--border-color);
+    --accent: var(--accent-color);
+    --accent-contrast: #ffffff;
+
+    /* Component surfaces */
+    --toolbar-bg: rgba(255, 255, 255, 0.85);
+    --toolbar-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+    --toolbar-backdrop: blur(12px);
+    --control-bg: rgba(125, 125, 125, 0.1);
+    --control-bg-hover: rgba(125, 125, 125, 0.14);
+
+    /* Toast */
+    --toast-bg: rgba(17, 24, 39, 0.92);
+    --toast-text: #ffffff;
+    --toast-surface: color-mix(in srgb, var(--toolbar-bg) 92%, transparent);
+    --toast-border: color-mix(in srgb, var(--border-color) 80%, transparent);
+    --toast-shadow: var(--shadow-2);
+    --success-color: #16a34a;
+    --danger-color: #dc2626;
+}
+
+body.theme-dark {
+    --bg-color: #121212;
+    --text-color: #E0E0E0;
+    --link-color: #8ab4f8;
+    --meta-color: #A0A0A0;
+    --border-color: rgba(255, 255, 255, 0.15);
+    --toolbar-bg: rgba(30, 30, 30, 0.85);
+    --toolbar-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    --accent-color: #8ab4f8;
+    --selection-bg: rgba(138, 180, 248, 0.3);
+    --focus-ring: rgba(138, 180, 248, 0.55);
+
+    --surface-0: var(--bg-color);
+    --surface-1: rgba(30, 30, 30, 0.55);
+    --surface-2: rgba(30, 30, 30, 0.85);
+    --text-1: var(--text-color);
+    --text-2: var(--meta-color);
+    --border-1: var(--border-color);
+    --accent: var(--accent-color);
+    --accent-contrast: #0b1220;
+
+    --toast-bg: rgba(17, 24, 39, 0.92);
+    --toast-text: #ffffff;
+    --toast-surface: color-mix(in srgb, var(--toolbar-bg) 88%, transparent);
+    --toast-border: color-mix(in srgb, var(--border-color) 85%, transparent);
+    --toast-shadow: var(--shadow-2);
+}
+
+body.theme-sepia {
+    --bg-color: #F4ECD8;
+    --text-color: #231F20;
+    --link-color: #2c5871;
+    --meta-color: #6F6354;
+    --border-color: rgba(111, 99, 84, 0.2);
+    --toolbar-bg: rgba(244, 236, 216, 0.9);
+    --toolbar-shadow: 0 8px 24px rgba(91, 70, 54, 0.12);
+    --accent-color: #A0522D;
+    --selection-bg: rgba(160, 82, 45, 0.2);
+    --focus-ring: rgba(160, 82, 45, 0.45);
+
+    --surface-0: var(--bg-color);
+    --surface-1: rgba(255, 255, 255, 0.35);
+    --surface-2: rgba(244, 236, 216, 0.92);
+    --text-1: var(--text-color);
+    --text-2: var(--meta-color);
+    --border-1: var(--border-color);
+    --accent: var(--accent-color);
+    --accent-contrast: #ffffff;
+
+    --toast-bg: rgba(45, 35, 28, 0.92);
+    --toast-text: #ffffff;
+    --toast-surface: color-mix(in srgb, var(--toolbar-bg) 92%, transparent);
+    --toast-border: color-mix(in srgb, var(--border-color) 85%, transparent);
+    --toast-shadow: var(--shadow-2);
+}
+
+body.theme-solarized {
+    --bg-color: #FDF6E3;
+    --text-color: #657B83;
+    --link-color: #268bd2;
+    --meta-color: #93a1a1;
+    --border-color: rgba(147, 161, 161, 0.2);
+    --toolbar-bg: rgba(253, 246, 227, 0.9);
+    --toolbar-shadow: 0 8px 24px rgba(101, 123, 131, 0.1);
+    --accent-color: #d33682;
+    --selection-bg: rgba(38, 139, 210, 0.2);
+    --focus-ring: rgba(211, 54, 130, 0.5);
+
+    --surface-0: var(--bg-color);
+    --surface-1: rgba(255, 255, 255, 0.45);
+    --surface-2: rgba(253, 246, 227, 0.92);
+    --text-1: var(--text-color);
+    --text-2: var(--meta-color);
+    --border-1: var(--border-color);
+    --accent: var(--accent-color);
+    --accent-contrast: #002b36;
+
+    --toast-bg: rgba(0, 43, 54, 0.92);
+    --toast-text: #ffffff;
+    --toast-surface: color-mix(in srgb, var(--toolbar-bg) 92%, transparent);
+    --toast-border: color-mix(in srgb, var(--border-color) 85%, transparent);
+    --toast-shadow: var(--shadow-2);
+}
