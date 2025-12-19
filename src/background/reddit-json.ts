@@ -28,10 +28,13 @@ const tryHttpUrl = (value: string | undefined | null): string | null => {
     }
 };
 
+const isRedditHostname = (hostname: string): boolean =>
+    hostname === 'reddit.com' || hostname.endsWith('.reddit.com');
+
 export function buildRedditPostJsonUrl(pageUrl: string): string | null {
     try {
         const url = new URL(pageUrl);
-        if (!url.hostname.includes('reddit.com') || !url.pathname.includes('/comments/')) return null;
+        if (!isRedditHostname(url.hostname) || !url.pathname.includes('/comments/')) return null;
 
         const basePath = url.pathname.replace(/\/$/, '');
         const jsonUrl = new URL(url.origin + basePath + '.json');
@@ -45,7 +48,7 @@ export function buildRedditPostJsonUrl(pageUrl: string): string | null {
 function extractPostIdFromRedditUrl(pageUrl: string): { origin: string; postId: string } | null {
     try {
         const url = new URL(pageUrl);
-        if (!url.hostname.includes('reddit.com') || !url.pathname.includes('/comments/')) return null;
+        if (!isRedditHostname(url.hostname) || !url.pathname.includes('/comments/')) return null;
         const match = url.pathname.match(/\/comments\/([a-z0-9]+)(?:\/|$)/i);
         const postId = match?.[1];
         if (!postId) return null;

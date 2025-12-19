@@ -1,6 +1,7 @@
 import browser from 'webextension-polyfill';
 import { RedditPostPayload } from '../content/reddit-extract';
 import { perf, PerfReport } from '../perf/trace';
+import { touchSessionToken } from '../shared/session-token-cache';
 
 console.log("[Reader Host] Script loaded");
 
@@ -211,7 +212,15 @@ function renderLoadingShell(sourceUrl?: string | null) {
     metaRow.className = 'meta-row';
     const metaText = document.createElement('span');
     metaText.className = 'meta-text';
-    metaText.textContent = sourceUrl ? new URL(sourceUrl).hostname.replace(/^www\./, '') : 'Fetching post';
+    let hostLabel: string | null = null;
+    if (sourceUrl) {
+        try {
+            hostLabel = new URL(sourceUrl).hostname.replace(/^www\./, '');
+        } catch {
+            hostLabel = null;
+        }
+    }
+    metaText.textContent = hostLabel || 'Fetching post';
     metaRow.appendChild(metaText);
     meta.appendChild(metaRow);
     header.appendChild(meta);
@@ -298,13 +307,50 @@ function persistTokenInUrl(token: string, trace: string) {
     try {
         const params = new URLSearchParams(window.location.hash.slice(1));
         params.delete('pending');
-        params.delete('sourceUrl');
         params.set('token', token);
         params.set('trace', trace);
         history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${params.toString()}`);
     } catch {
         // ignore
     }
+}
+
+function getSourceUrlFromHash(): string | null {
+    try {
+        const params = new URLSearchParams(window.location.hash.slice(1));
+        return params.get('sourceUrl');
+    } catch {
+        return null;
+    }
+}
+
+async function attemptAutoRetry(sourceUrl: string, hostEvents: ReturnType<typeof perf.event>[]): Promise<boolean> {
+    const parsed = parseHttpUrl(sourceUrl);
+    if (!parsed) return false;
+
+    const nextTrace = crypto.randomUUID();
+    traceId = nextTrace;
+    try {
+        const params = new URLSearchParams(window.location.hash.slice(1));
+        params.delete('token');
+        params.set('pending', '1');
+        params.set('trace', nextTrace);
+        params.set('sourceUrl', parsed.toString());
+        history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${params.toString()}`);
+    } catch {
+        // ignore
+    }
+
+    renderLoadingShell(parsed.toString());
+    try {
+        await browser.runtime.sendMessage({ type: 'HOST_PAYLOAD_REQUEST', traceId: nextTrace, url: parsed.toString() });
+    } catch {
+        renderErrorMode('Failed to reload article. Please try again from the original Reddit post.', parsed.toString());
+        return true;
+    }
+
+    await waitForPendingPayload(nextTrace, hostEvents);
+    return true;
 }
 
 async function initTokenProtocol(token: string, hostEvents: ReturnType<typeof perf.event>[]) {
@@ -315,9 +361,13 @@ async function initTokenProtocol(token: string, hostEvents: ReturnType<typeof pe
     const payload = data[token] as RedditPostPayload | undefined;
 
     if (!payload) {
-        renderErrorMode("Article data expired or not found. Please try extracting again.");
+        const sourceUrl = getSourceUrlFromHash();
+        if (sourceUrl && await attemptAutoRetry(sourceUrl, hostEvents)) return;
+        renderErrorMode('Article data expired. Please reload from the original Reddit post.');
         return;
     }
+
+    await touchSessionToken(token);
 
     // 3. Cleanup Storage logic - DISABLED to allow page refreshes
     // Was: await browser.storage.session.remove(token);
@@ -1158,9 +1208,11 @@ async function loadComments() {
                 }
             ],
         });
-        listEl.replaceChildren();
+        if (!keepCommentsListDuringNextLoad) {
+            listEl.replaceChildren();
+            currentComments = [];
+        }
         updateCommentsFooter({ hasMore: keepCommentsListDuringNextLoad, limit, loading: false, permalink: currentPost?.permalink });
-        currentComments = [];
     } finally {
         keepCommentsListDuringNextLoad = false;
         if (requestSeq === commentsLoadSeq) {

@@ -58,4 +58,29 @@ describe('Reader Host init flow', () => {
         const errorBox = document.querySelector('.error-box') as HTMLElement | null;
         expect(errorBox?.textContent).toContain('expired');
     });
+
+    it('handles pending state with malformed sourceUrl', async () => {
+        window.location.hash = '#pending=1&trace=test&sourceUrl=%%%';
+
+        await __test__.init();
+
+        const header = document.querySelector('header.post-header h1') as HTMLElement | null;
+        expect(header?.textContent).toContain('Loading');
+        const meta = document.querySelector('header.post-header .meta-text') as HTMLElement | null;
+        expect(meta?.textContent).toContain('Fetching');
+    });
+
+    it('auto-retries when token is missing and sourceUrl is available', async () => {
+        (browser.storage.session.get as any).mockResolvedValueOnce({});
+        (browser.runtime.sendMessage as any).mockResolvedValueOnce(undefined);
+
+        window.location.hash = '#token=missing&sourceUrl=https%3A%2F%2Fwww.reddit.com%2Fr%2Ftest%2Fcomments%2Fabc%2Fpost';
+        await __test__.init();
+
+        expect(browser.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'HOST_PAYLOAD_REQUEST',
+            url: 'https://www.reddit.com/r/test/comments/abc/post',
+        }));
+        expect(window.location.hash).toContain('pending=1');
+    });
 });

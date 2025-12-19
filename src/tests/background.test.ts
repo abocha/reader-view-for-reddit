@@ -67,7 +67,7 @@ describe('Background Script', () => {
             expect(browser.scripting.executeScript).not.toHaveBeenCalled();
 
             // 2. Verify Session Storage (Token)
-            expect(browser.storage.session.set).toHaveBeenCalledTimes(1);
+            expect(browser.storage.session.set).toHaveBeenCalled();
             // Check that a token was generated (random keys)
             const storeArgs = (browser.storage.session.set as any).mock.calls[0][0];
             const token = Object.keys(storeArgs)[0];

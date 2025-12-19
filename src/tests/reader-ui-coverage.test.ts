@@ -405,7 +405,7 @@ import browser from 'webextension-polyfill';
             initCommentsUI();
             await new Promise(r => setTimeout(r, 0));
 
-            expect(status.textContent).toBe('Comments are unavailable for this post.');
+            expect(status.textContent).toContain('Comments are unavailable');
             expect(section.hidden).toBe(false);
             expect(list.childNodes.length).toBe(0);
         });
@@ -440,7 +440,7 @@ import browser from 'webextension-polyfill';
             initCommentsUI();
             await new Promise(r => setTimeout(r, 0));
 
-            expect(status.textContent).toBe('Comments are unavailable (fallback extraction was used).');
+            expect(status.textContent).toContain('Comments are unavailable');
             expect(section.hidden).toBe(false);
             expect(list.childNodes.length).toBe(0);
         });

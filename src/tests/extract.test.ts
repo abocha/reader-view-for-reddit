@@ -114,4 +114,18 @@ describe('extractRedditPost', () => {
             expect(result.error).toContain('Not a Reddit post URL');
         }
     });
+
+    it('should reject lookalike reddit hostnames', async () => {
+        // @ts-ignore
+        window.location = {
+            hostname: 'reddit.com.evil.tld',
+            pathname: '/r/test/comments/123/post/'
+        };
+
+        const result = await extractRedditPost();
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+            expect(result.error).toContain('Not a Reddit post URL');
+        }
+    });
 });

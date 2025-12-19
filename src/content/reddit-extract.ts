@@ -58,10 +58,13 @@ export async function extractRedditPost(): Promise<ExtractionResult> {
         }
     };
 
+    const isRedditHostname = (hostname: string): boolean =>
+        hostname === 'reddit.com' || hostname.endsWith('.reddit.com');
+
     try {
         const loc = window.location;
         // Basic validation
-        if (!loc.hostname.includes('reddit.com') || !loc.pathname.includes('/comments/')) {
+        if (!isRedditHostname(loc.hostname) || !loc.pathname.includes('/comments/')) {
             return { ok: false, error: 'Not a Reddit post URL' };
         }
 

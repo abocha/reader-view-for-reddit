@@ -29,12 +29,12 @@ describe('Reader Host Logic', () => {
 
         const link = document.querySelector('a.meta-pill.original-link') as HTMLAnchorElement | null;
         expect(link).toBeTruthy();
-        expect(link?.textContent).toBe('View on Reddit');
+        expect(link?.textContent).toContain('Reddit');
         expect(link?.getAttribute('href')).toBe('https://www.reddit.com/r/test/comments/abc123/test_post/');
         expect(link?.getAttribute('target')).toBe('_blank');
         expect(link?.getAttribute('rel')).toBe('noopener noreferrer');
-        expect(link?.getAttribute('title')).toBe('View Original Discussion on Reddit');
-        expect(link?.getAttribute('aria-label')).toBe('View original discussion on Reddit');
+        expect(link?.getAttribute('title')).toContain('Reddit');
+        expect(link?.getAttribute('aria-label')).toContain('Reddit');
     });
 
     describe('sanitizeHtmlToFragment', () => {

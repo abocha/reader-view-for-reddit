@@ -1,7 +1,8 @@
 import browser, { Tabs } from 'webextension-polyfill';
-import { extractRedditPost, ExtractionResult } from '../content/reddit-extract';
+import { extractRedditPost, ExtractionResult, RedditPostPayload } from '../content/reddit-extract';
 import { fetchRedditPostPayloadFromJson } from './reddit-json';
 import { perf, PerfReport, summarize } from '../perf/trace';
+import { recordSessionToken } from '../shared/session-token-cache';
 
 // --- Core Logic ---
 
@@ -16,10 +17,14 @@ const COMMENTS_CACHE_MAX = 10;
 const COMMENTS_CACHE_MAX_BYTES = 8_000_000; // approx JSON length (in-memory cap)
 const commentsCache = new Map<string, { value: unknown; expiresAt: number }>();
 
+function isRedditHostname(hostname: string): boolean {
+    return hostname === 'reddit.com' || hostname.endsWith('.reddit.com');
+}
+
 function normalizeRedditPostCacheKey(pageUrl: string): string | null {
     try {
         const url = new URL(pageUrl);
-        if (!url.hostname.includes('reddit.com') || !url.pathname.includes('/comments/')) return null;
+        if (!isRedditHostname(url.hostname) || !url.pathname.includes('/comments/')) return null;
         const path = url.pathname.replace(/\/$/, '');
         return `${url.origin}${path}`;
     } catch {
@@ -182,6 +187,7 @@ export async function processTab(tab: Tabs.Tab) {
             [pendingKey]: token,
         });
         events.push(storeSpan.startEvent, storeSpan.end());
+        await recordSessionToken(token, tab.url);
 
         // 3. Open Host Page (or hydrate the already-opened pending host).
         if (openMode === 'new-tab' && pendingTraceId) {
@@ -192,7 +198,7 @@ export async function processTab(tab: Tabs.Tab) {
             }
         } else {
             const navSpan = perf.span('open_host_page', { openMode });
-            await openHostPage(tab.id, token, openMode, traceId);
+            await openHostPage(tab.id, token, openMode, traceId, tab.url);
             events.push(navSpan.startEvent, navSpan.end());
         }
 
@@ -207,10 +213,12 @@ export async function processTab(tab: Tabs.Tab) {
     }
 }
 
-export async function openHostPage(sourceTabId: number, token: string, openMode: OpenMode, traceId?: string) {
+export async function openHostPage(sourceTabId: number, token: string, openMode: OpenMode, traceId?: string, sourceUrl?: string) {
     const hostUrl =
         browser.runtime.getURL('pages/reader-host.html') +
-        `#token=${token}${traceId ? `&trace=${encodeURIComponent(traceId)}` : ''}`;
+        `#token=${token}` +
+        `${traceId ? `&trace=${encodeURIComponent(traceId)}` : ''}` +
+        `${sourceUrl ? `&sourceUrl=${encodeURIComponent(sourceUrl)}` : ''}`;
     if (openMode === 'new-tab') {
         await browser.tabs.create({ url: hostUrl, active: true });
         return;
@@ -223,6 +231,73 @@ export async function openHostPagePending(traceId: string, sourceUrl?: string) {
         browser.runtime.getURL('pages/reader-host.html') +
         `#pending=1&trace=${encodeURIComponent(traceId)}${sourceUrl ? `&sourceUrl=${encodeURIComponent(sourceUrl)}` : ''}`;
     await browser.tabs.create({ url: hostUrl, active: true });
+}
+
+async function waitForTabLoad(tabId: number, timeoutMs = 10000): Promise<void> {
+    const onUpdated = browser.tabs?.onUpdated;
+    if (!onUpdated?.addListener) return;
+
+    await new Promise<void>((resolve) => {
+        const listener = (updatedId: number, changeInfo: { status?: string }) => {
+            if (updatedId !== tabId) return;
+            if (changeInfo.status !== 'complete') return;
+            onUpdated.removeListener(listener);
+            globalThis.clearTimeout(timer);
+            resolve();
+        };
+
+        const timer = globalThis.setTimeout(() => {
+            onUpdated.removeListener(listener);
+            resolve();
+        }, timeoutMs);
+
+        onUpdated.addListener(listener);
+    });
+}
+
+async function extractPayloadViaTempTab(url: string): Promise<RedditPostPayload> {
+    const tempTab = await browser.tabs.create({ url, active: false });
+    if (!tempTab?.id) throw new Error('Failed to create temp tab');
+
+    try {
+        await waitForTabLoad(tempTab.id);
+        const results = await browser.scripting.executeScript({
+            target: { tabId: tempTab.id },
+            func: extractRedditPost
+        });
+
+        const result = results[0]?.result as ExtractionResult;
+        if (!result || !result.ok) {
+            throw new Error(result?.error || 'Unknown extraction error');
+        }
+        return result.payload;
+    } finally {
+        try {
+            await browser.tabs.remove(tempTab.id);
+        } catch {
+            // ignore cleanup failures
+        }
+    }
+}
+
+async function extractPayloadWithFallback(
+    url: string,
+    events: ReturnType<typeof perf.event>[]
+): Promise<{ payload: RedditPostPayload; method: 'json' | 'executeScript' }> {
+    try {
+        const jsonSpan = perf.span('extract_json');
+        events.push(jsonSpan.startEvent);
+        const fetched = await fetchRedditPostPayloadFromJson(url);
+        events.push(jsonSpan.end({ ok: true, ...fetched.meta }));
+        return { payload: fetched.payload, method: 'json' };
+    } catch (err: any) {
+        events.push(perf.event('extract_json:error', { error: err?.message || String(err) }));
+        const execSpan = perf.span('extract_executeScript');
+        events.push(execSpan.startEvent);
+        const payload = await extractPayloadViaTempTab(url);
+        events.push(execSpan.end({ ok: true }));
+        return { payload, method: 'executeScript' };
+    }
 }
 
 export async function openReaderViewForUrl(url: string) {
@@ -238,17 +313,15 @@ export async function openReaderViewForUrl(url: string) {
 
         const extractOverall = perf.span('extract');
         events.push(extractOverall.startEvent);
-        const jsonSpan = perf.span('extract_json');
-        events.push(jsonSpan.startEvent);
-        const fetched = await fetchRedditPostPayloadFromJson(url);
-        events.push(jsonSpan.end({ ok: true, ...fetched.meta }));
-        events.push(extractOverall.end({ ok: true, method: 'json' }));
+        const { payload, method: extractMethod } = await extractPayloadWithFallback(url, events);
+        events.push(extractOverall.end({ ok: true, method: extractMethod }));
 
         const token = crypto.randomUUID();
         const storeSpan = perf.span('session_set');
         const pendingKey = `pending_token:${traceId}`;
-        await browser.storage.session.set({ [token]: fetched.payload, [pendingKey]: token });
+        await browser.storage.session.set({ [token]: payload, [pendingKey]: token });
         events.push(storeSpan.startEvent, storeSpan.end());
+        await recordSessionToken(token, url);
 
         try {
             await browser.runtime.sendMessage({ type: 'HOST_PAYLOAD_READY', traceId, token });
@@ -257,7 +330,7 @@ export async function openReaderViewForUrl(url: string) {
         }
 
         events.push(perf.event('openUrl:end'));
-        void recordPerf({ traceId, scope: 'background', events, meta: { ok: true, openMode: 'new-tab', extractMethod: 'json' } });
+        void recordPerf({ traceId, scope: 'background', events, meta: { ok: true, openMode: 'new-tab', extractMethod } });
     } catch (err: any) {
         events.push(perf.event('openUrl:error', { error: err?.message || String(err) }));
         void recordPerf({ traceId, scope: 'background', events, meta: { ok: false, openMode: 'new-tab' } });
@@ -395,6 +468,7 @@ browser.menus.onClicked.addListener((info, tab) => {
 
 export const __test__ = {
     showInPageToast,
+    normalizeRedditPostCacheKey,
 };
 
 type StoredTrace = PerfReport & { createdAt: number };
@@ -429,6 +503,42 @@ if (browser.runtime?.onMessage?.addListener) {
             const report = (msg as any).report as PerfReport | undefined;
             if (report && typeof report.traceId === 'string' && Array.isArray(report.events)) {
                 void recordPerf(report);
+            }
+            return;
+        }
+
+        if (type === 'HOST_PAYLOAD_REQUEST') {
+            const traceId = (msg as any).traceId;
+            const url = (msg as any).url;
+            if (typeof traceId !== 'string' || !traceId) return;
+            if (typeof url !== 'string' || !url) return;
+
+            const events = [perf.event('host_request:start', { traceId, url })];
+            try {
+                const extractOverall = perf.span('extract');
+                events.push(extractOverall.startEvent);
+                const { payload, method: extractMethod } = await extractPayloadWithFallback(url, events);
+                events.push(extractOverall.end({ ok: true, method: extractMethod }));
+
+                const token = crypto.randomUUID();
+                const storeSpan = perf.span('session_set');
+                const pendingKey = `pending_token:${traceId}`;
+                await browser.storage.session.set({ [token]: payload, [pendingKey]: token });
+                events.push(storeSpan.startEvent, storeSpan.end());
+                await recordSessionToken(token, url);
+
+                try {
+                    await browser.runtime.sendMessage({ type: 'HOST_PAYLOAD_READY', traceId, token });
+                } catch {
+                    // ignore
+                }
+
+                events.push(perf.event('host_request:end'));
+                void recordPerf({ traceId, scope: 'background', events, meta: { ok: true, source: 'host_request', extractMethod } });
+            } catch (err: any) {
+                events.push(perf.event('host_request:error', { error: err?.message || String(err) }));
+                void recordPerf({ traceId, scope: 'background', events, meta: { ok: false, source: 'host_request' } });
+                await browser.runtime.sendMessage({ type: 'HOST_PAYLOAD_ERROR', traceId, error: err?.message || String(err) }).catch(() => undefined);
             }
             return;
         }

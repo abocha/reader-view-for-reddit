@@ -200,4 +200,63 @@ describe('Background Script Coverage', () => {
             vi.useRealTimers();
         });
     });
+
+    describe('Reddit cache key helpers', () => {
+        it('should reject lookalike hostnames', async () => {
+            const { __test__ } = await import('../background/index');
+
+            const bad = __test__.normalizeRedditPostCacheKey('https://reddit.com.evil.tld/r/test/comments/abc/post/');
+            const bad2 = __test__.normalizeRedditPostCacheKey('https://notreddit.com/r/test/comments/abc/post/');
+            const good = __test__.normalizeRedditPostCacheKey('https://www.reddit.com/r/test/comments/abc/post/');
+
+            expect(bad).toBeNull();
+            expect(bad2).toBeNull();
+            expect(good).toContain('/r/test/comments/abc/post');
+        });
+    });
+
+    describe('openReaderViewForUrl fallback', () => {
+        it('should fall back to executeScript when JSON fetch fails', async () => {
+            const { openReaderViewForUrl } = await import('../background/index');
+
+            (globalThis.fetch as any).mockResolvedValue({ ok: false, status: 500 });
+
+            (browser.tabs as any).onUpdated = {
+                addListener: (fn: any) => { fn(2, { status: 'complete' }); },
+                removeListener: () => { /* noop */ },
+            };
+
+            (browser.tabs.create as any)
+                .mockResolvedValueOnce({ id: 1 }) // pending host
+                .mockResolvedValueOnce({ id: 2 }); // temp tab for extraction
+            (browser.tabs.remove as any) = vi.fn().mockResolvedValue(undefined);
+
+            (browser.scripting.executeScript as any).mockResolvedValueOnce([
+                {
+                    result: {
+                        ok: true,
+                        payload: {
+                            title: 'T',
+                            author: 'a',
+                            subreddit: 'r/x',
+                            bodyHtml: '',
+                            bodyMarkdown: '',
+                            url: 'https://www.reddit.com/r/x',
+                            isFallback: false,
+                        },
+                    },
+                },
+            ]);
+
+            const readySpy = (browser.runtime.sendMessage as any).mockResolvedValue(undefined);
+
+            await openReaderViewForUrl('https://www.reddit.com/r/x/comments/abc/post');
+
+            expect(browser.scripting.executeScript).toHaveBeenCalledWith(expect.objectContaining({
+                target: { tabId: 2 },
+            }));
+            expect(browser.tabs.remove).toHaveBeenCalledWith(2);
+            expect(readySpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'HOST_PAYLOAD_READY' }));
+        });
+    });
 });

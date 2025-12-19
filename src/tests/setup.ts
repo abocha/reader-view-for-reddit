@@ -27,7 +27,8 @@ const browserMock = {
         },
         session: {
             get: vi.fn().mockResolvedValue({}),
-            set: vi.fn().mockResolvedValue(undefined)
+            set: vi.fn().mockResolvedValue(undefined),
+            remove: vi.fn().mockResolvedValue(undefined)
         }
     },
     action: {

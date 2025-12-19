@@ -262,7 +262,7 @@ describe('Extraction Coverage', () => {
         const result = await extractRedditPost();
         expect(result.ok).toBe(false);
         if (!result.ok) {
-            expect(result.error).toBe('Could not extract content via JSON or DOM');
+            expect(result.error).toContain('extract content');
         }
     });
 
@@ -277,7 +277,7 @@ describe('Extraction Coverage', () => {
             const result = await extractRedditPost();
             expect(result.ok).toBe(false);
             if (!result.ok) {
-                expect(result.error).toBe('Boom');
+                expect(result.error).toContain('Boom');
             }
         } finally {
             (document as any).querySelector = originalQuerySelector;

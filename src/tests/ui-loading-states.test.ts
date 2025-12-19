@@ -39,6 +39,7 @@ describe('Loading states', () => {
             <section id="comments"></section>
             <div id="comments-status"></div>
             <div id="comments-list"></div>
+            <div id="comments-footer"></div>
             <div id="spike-article"></div>
             <div id="settings-drawer"></div>
         `;
@@ -129,5 +130,62 @@ describe('Loading states', () => {
         await new Promise(r => setTimeout(r, 0));
 
         expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('should keep existing comments when load-more fails', async () => {
+        const { renderArticle, initCommentsUI } = await import('../pages/reader-host');
+
+        (globalThis.fetch as any) = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => [
+                    { kind: 'Listing', data: { children: [{ kind: 't3', data: { num_comments: 2 } }] } },
+                    {
+                        kind: 'Listing',
+                        data: {
+                            children: [
+                                {
+                                    kind: 't1',
+                                    data: {
+                                        id: 'c1',
+                                        author: 'tester',
+                                        body: 'Hello',
+                                        body_html: '<p>Hello</p>',
+                                        score: 3,
+                                        replies: '',
+                                    },
+                                },
+                                { kind: 'more', data: {} },
+                            ],
+                        },
+                    },
+                ],
+            })
+            .mockResolvedValueOnce({ ok: false, status: 500 });
+
+        renderArticle({
+            title: 'Post',
+            author: 'me',
+            subreddit: 'r/test',
+            bodyHtml: '',
+            bodyMarkdown: 'md',
+            url: 'http://test.com',
+            isFallback: false,
+            permalink: '/r/test/123/post',
+        } as any);
+
+        initCommentsUI();
+        await new Promise(r => setTimeout(r, 0));
+
+        const listEl = document.getElementById('comments-list') as HTMLElement;
+        expect(listEl.querySelectorAll('.comment').length).toBeGreaterThan(0);
+
+        const loadMore = document.querySelector('button[data-role="load-more-comments"]') as HTMLButtonElement | null;
+        loadMore?.click();
+        await new Promise(r => setTimeout(r, 0));
+
+        expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+        expect(listEl.querySelectorAll('.comment').length).toBeGreaterThan(0);
     });
 });
