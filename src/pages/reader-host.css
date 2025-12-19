@@ -116,6 +116,42 @@
     filter: blur(12px);
 }
 
+.post-spoiler.blur-spoilers .post-body:not(.spoiler-revealed) {
+    filter: blur(10px);
+}
+
+.post-body-wrapper {
+    position: relative;
+}
+
+.post-body-wrapper .spoiler-reveal-btn {
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    height: 44px;
+    width: max-content;
+    max-width: 90%;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 18px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
+    background: color-mix(in srgb, var(--toolbar-bg) 92%, transparent);
+    color: var(--text-color);
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 12px 26px rgba(0, 0, 0, 0.12);
+}
+
+.blur-spoilers.post-spoiler .post-body-wrapper:not(.spoiler-revealed) .spoiler-reveal-btn {
+    display: inline-flex;
+}
+
+.post-body-wrapper.spoiler-revealed .spoiler-reveal-btn {
+    display: none;
+}
+
 .blur-spoilers .md-spoiler-text {
     background: color-mix(in srgb, var(--border-color) 40%, transparent);
     color: transparent;

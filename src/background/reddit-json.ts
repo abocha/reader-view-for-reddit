@@ -170,6 +170,7 @@ export async function fetchRedditPostPayloadFromJson(pageUrl: string): Promise<{
             postId: finalPost.id,
             nsfw: Boolean(finalPost.over_18),
             spoiler: Boolean(finalPost.spoiler),
+            score: typeof finalPost.score === 'number' ? finalPost.score : undefined,
             media,
         },
         meta: { endpoint: 'permalink', bytes, url: permalinkUrl },
@@ -244,6 +245,7 @@ function buildPayloadFromPostData(pageUrl: string, initialPost: RedditPostData):
         postId: finalPost.id,
         nsfw: Boolean(finalPost.over_18),
         spoiler: Boolean(finalPost.spoiler),
+        score: typeof finalPost.score === 'number' ? finalPost.score : undefined,
         media,
     };
 }

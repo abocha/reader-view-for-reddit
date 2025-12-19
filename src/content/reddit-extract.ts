@@ -12,6 +12,7 @@ export interface RedditPostPayload {
     postId?: string;
     nsfw?: boolean;
     spoiler?: boolean;
+    score?: number;
     media?: {
         type: 'image' | 'gallery' | 'video';
         url: string;
@@ -162,6 +163,7 @@ export async function extractRedditPost(): Promise<ExtractionResult> {
                         postId: finalPost.id,
                         nsfw: Boolean(finalPost.over_18),
                         spoiler: Boolean(finalPost.spoiler),
+                        score: typeof finalPost.score === 'number' ? finalPost.score : undefined,
                         media,
                     }
                 };
@@ -210,6 +212,7 @@ export async function extractRedditPost(): Promise<ExtractionResult> {
                 url: loc.href,
                 nsfw: false,
                 spoiler: false,
+                score: undefined,
             }
         };
 

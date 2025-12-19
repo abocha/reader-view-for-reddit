@@ -946,7 +946,8 @@ export function renderArticle(post: RedditPostPayload) {
 
     const metaText = document.createElement('span');
     metaText.className = 'meta-text';
-    metaText.textContent = `${post.subreddit} • u/${post.author}`;
+    const scoreText = typeof post.score === 'number' ? ` • ${post.score} points` : '';
+    metaText.textContent = `${post.subreddit} • u/${post.author}${scoreText}`;
     metaRow.appendChild(metaText);
 
     if (post.isFallback) {
@@ -991,11 +992,15 @@ export function renderArticle(post: RedditPostPayload) {
 
     const mediaEl = renderMedia(post);
     if (mediaEl) content.appendChild(mediaEl);
+    const permalinkUrl = getPostPermalinkUrl(post);
 
     const bodyFragment = sanitizeHtmlToFragment(post.bodyHtml || '');
     const hasBody = bodyFragment.childNodes.length > 0;
 
     if (hasBody) {
+        const bodyWrapper = document.createElement('div');
+        bodyWrapper.className = 'post-body-wrapper';
+
         const body = document.createElement('div');
         body.className = 'post-body';
         body.appendChild(bodyFragment);
@@ -1013,8 +1018,25 @@ export function renderArticle(post: RedditPostPayload) {
             });
         }
 
-        content.appendChild(body);
-        scheduleEnhance(body);
+        if (post.spoiler) {
+            const revealBtn = document.createElement('button');
+            revealBtn.type = 'button';
+            revealBtn.className = 'spoiler-reveal-btn';
+            revealBtn.textContent = 'View spoiler';
+            revealBtn.setAttribute('aria-pressed', 'false');
+            revealBtn.setAttribute('aria-label', 'View spoiler');
+            revealBtn.addEventListener('click', () => {
+                body.classList.add('spoiler-revealed');
+                bodyWrapper.classList.add('spoiler-revealed');
+                revealBtn.remove();
+            });
+            bodyWrapper.append(body, revealBtn);
+        } else {
+            bodyWrapper.append(body);
+        }
+
+        content.appendChild(bodyWrapper);
+        scheduleEnhance(body, { openUrl: permalinkUrl || undefined });
     } else {
         const notice = document.createElement('div');
         notice.className = 'notice-box';
@@ -1061,11 +1083,11 @@ export function renderArticle(post: RedditPostPayload) {
     document.title = post.title;
 }
 
-function scheduleEnhance(container: HTMLElement) {
+function scheduleEnhance(container: HTMLElement, options?: { openUrl?: string }) {
     const run = () => {
         try {
-            enhanceInlineMedia(container);
-            enhanceInlineImages(container);
+            enhanceInlineMedia(container, options);
+            enhanceInlineImages(container, options);
             enhanceSpoilers(container);
         } catch {
             // ignore enhancement failures
@@ -1107,6 +1129,15 @@ function enhanceSpoilers(container: HTMLElement) {
     }
 }
 
+function getPostPermalinkUrl(post: RedditPostPayload): string | null {
+    if (post.permalink) {
+        const path = post.permalink.startsWith('/') ? post.permalink : `/${post.permalink}`;
+        return `https://www.reddit.com${path}`;
+    }
+    const parsed = parseHttpUrl(post.url);
+    return parsed ? parsed.toString() : null;
+}
+
 export function renderMedia(post: RedditPostPayload): HTMLElement | null {
     if (!post.media) return null;
 
@@ -1130,7 +1161,9 @@ export function renderMedia(post: RedditPostPayload): HTMLElement | null {
     const link = document.createElement('a');
     const parsed = parseHttpUrl(post.media.url);
     if (!parsed) return null;
-    link.href = parsed.toString();
+    const openOnReddit = post.media.type === 'gallery' || post.media.type === 'video';
+    const permalinkUrl = openOnReddit ? getPostPermalinkUrl(post) : null;
+    link.href = permalinkUrl || parsed.toString();
     link.target = '_blank';
     link.rel = 'noopener noreferrer';
     link.className = 'media-link-wrapper';
@@ -1146,15 +1179,18 @@ export function renderMedia(post: RedditPostPayload): HTMLElement | null {
         img.decoding = 'async';
         link.appendChild(img);
         wrapper.append(link);
+        if (openOnReddit) {
+            const caption = document.createElement('div');
+            caption.className = 'media-caption';
+            caption.textContent = 'View on Reddit';
+            wrapper.append(caption);
+        }
         return wrapper;
     }
 
-    const caption = document.createElement('div');
-    caption.className = 'media-caption';
-    caption.textContent = 'Open video in a new tab';
-    link.textContent = parsed.hostname.replace(/^www\./, '');
+    link.textContent = openOnReddit ? 'View on Reddit' : parsed.hostname.replace(/^www\./, '');
     link.classList.add('media-link');
-    wrapper.append(link, caption);
+    wrapper.append(link);
     return wrapper;
 }
 
@@ -1635,7 +1671,7 @@ export function renderCommentTree(
     return wrapper;
 }
 
-export function enhanceInlineMedia(container: HTMLElement) {
+export function enhanceInlineMedia(container: HTMLElement, options?: { openUrl?: string }) {
     const anchors = Array.from(container.querySelectorAll('a'));
     for (const a of anchors) {
         if (a.dataset.rvrrEnhanced === '1') continue;
@@ -1645,7 +1681,7 @@ export function enhanceInlineMedia(container: HTMLElement) {
 
         // Image links (GIF previews are intentionally not supported)
         if (isProbablyImageUrl(href)) {
-            const preview = createImagePreview(href);
+            const preview = createImagePreview(href, options?.openUrl);
             a.replaceWith(preview);
             continue;
         }
@@ -1653,6 +1689,7 @@ export function enhanceInlineMedia(container: HTMLElement) {
         // Gifs (e.g. [gif](giphy|...)) are shown as links only.
         if (isGiphyGifPage(href)) {
             a.dataset.rvrrEnhanced = '1';
+            if (options?.openUrl) a.setAttribute('href', options.openUrl);
             const text = (a.textContent || '').trim();
             if (!text || text.startsWith('![gif]') || text.startsWith('[gif]')) {
                 a.textContent = 'Giphy GIF';
@@ -1690,7 +1727,7 @@ function isGiphyGifPage(url: string): boolean {
     }
 }
 
-export function enhanceInlineImages(container: HTMLElement) {
+export function enhanceInlineImages(container: HTMLElement, options?: { openUrl?: string }) {
     const imgs = Array.from(container.querySelectorAll('img'));
     for (const img of imgs) {
         if (img.dataset.rvrrEnhanced === '1') continue;
@@ -1701,7 +1738,7 @@ export function enhanceInlineImages(container: HTMLElement) {
         (img as HTMLImageElement).loading = 'lazy';
         (img as HTMLImageElement).decoding = 'async';
         img.addEventListener('click', () => {
-            const url = img.getAttribute('src');
+            const url = options?.openUrl || img.getAttribute('src');
             if (!url) return;
             window.open(url, '_blank', 'noopener,noreferrer');
         });
@@ -1723,7 +1760,7 @@ function shouldThumbnailImageUrl(url: string): boolean {
     );
 }
 
-function createImagePreview(url: string): HTMLElement {
+function createImagePreview(url: string, openUrl?: string): HTMLElement {
     const wrapper = document.createElement('div');
     wrapper.className = 'inline-media';
     wrapper.dataset.rvrrEnhanced = '1';
@@ -1737,7 +1774,7 @@ function createImagePreview(url: string): HTMLElement {
     img.alt = '';
 
     img.addEventListener('click', () => {
-        window.open(url, '_blank', 'noopener,noreferrer');
+        window.open(openUrl || url, '_blank', 'noopener,noreferrer');
     });
 
     wrapper.appendChild(img);
