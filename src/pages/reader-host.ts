@@ -29,6 +29,7 @@ let benchmarkLimitOverride: number | null = null;
 let benchmarkSortOverride: string | null = null;
 let benchmarkAutoComments = false;
 let pendingScrollAnchor: { commentId: string; top: number } | null = null;
+let pendingCommentFocusId: string | null = null;
 let keepCommentsListDuringNextLoad = false;
 
 const COMMENTS_LIMIT_OPTIONS = [50, 100, 200, 300, 400, 500] as const;
@@ -134,6 +135,26 @@ function captureCommentsScrollAnchor(): { commentId: string; top: number } | nul
         }
     }
     return null;
+}
+
+function captureCommentFocus() {
+    const active = document.activeElement as HTMLElement | null;
+    if (!active) return;
+    const commentEl = active.closest<HTMLElement>('.comment[data-comment-id]');
+    if (!commentEl) return;
+    pendingCommentFocusId = commentEl.dataset.commentId || null;
+}
+
+function restoreCommentFocus() {
+    const commentId = pendingCommentFocusId;
+    if (!commentId) return;
+    pendingCommentFocusId = null;
+    const listEl = document.getElementById('comments-list') as HTMLElement | null;
+    if (!listEl) return;
+    const toggle = listEl.querySelector<HTMLElement>(
+        `.comment[data-comment-id="${CSS.escape(commentId)}"] .comment-toggle`
+    );
+    toggle?.focus();
 }
 
 function restoreCommentsScrollAnchor() {
@@ -542,6 +563,8 @@ export function initActions() {
     const drawer = document.getElementById('settings-drawer');
     const toggleDrawerBtn = document.getElementById('toggle-drawer');
     const closeDrawerBtn = document.getElementById('close-drawer');
+    const toolbar = document.getElementById('reader-toolbar');
+    const main = document.querySelector('main');
     let lastDrawerOpener: Element | null = null;
     let drawerKeyListenerBound = false;
 
@@ -570,6 +593,10 @@ export function initActions() {
             drawer.classList.add('open', 'is-open');
             drawer.setAttribute('aria-hidden', 'false');
             toggleDrawerBtn?.setAttribute('aria-expanded', 'true');
+            toolbar?.setAttribute('aria-hidden', 'true');
+            if (toolbar) (toolbar as any).inert = true;
+            main?.setAttribute('aria-hidden', 'true');
+            if (main) (main as any).inert = true;
             const focusables = getFocusableInDrawer();
             (focusables[0] ?? closeDrawerBtn ?? drawer).focus();
 
@@ -610,6 +637,16 @@ export function initActions() {
             drawer.classList.remove('open', 'is-open');
             drawer.setAttribute('aria-hidden', 'true');
             toggleDrawerBtn?.setAttribute('aria-expanded', 'false');
+            toolbar?.removeAttribute('aria-hidden');
+            if (toolbar) {
+                (toolbar as any).inert = false;
+                toolbar.removeAttribute('inert');
+            }
+            main?.removeAttribute('aria-hidden');
+            if (main) {
+                (main as any).inert = false;
+                main.removeAttribute('inert');
+            }
             if (lastDrawerOpener instanceof HTMLElement) lastDrawerOpener.focus();
             lastDrawerOpener = null;
         }
@@ -1403,6 +1440,7 @@ function rerenderComments() {
     const listEl = document.getElementById('comments-list') as HTMLElement | null;
     if (!listEl) return;
 
+    captureCommentFocus();
     listEl.replaceChildren();
 
     const depth = getCommentsDepth();
@@ -1415,6 +1453,7 @@ function rerenderComments() {
         listEl.appendChild(renderCommentTree(top, { depthLimit: depth, autoDepth, hideLow, promotedPathIds: promoted }, 0, false));
     }
 
+    restoreCommentFocus();
     scheduleEnhance(listEl);
 }
 
@@ -1437,6 +1476,10 @@ export function renderCommentTree(
     const isCollapsed = collapsedById.has(comment.id);
     toggle.textContent = isCollapsed ? '▸' : '▾';
     toggle.title = isCollapsed ? 'Expand' : 'Collapse';
+    toggle.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
+    toggle.setAttribute('aria-label', isCollapsed ? 'Expand comment' : 'Collapse comment');
+    const bodyId = `comment-body-${comment.id}`;
+    toggle.setAttribute('aria-controls', bodyId);
     toggle.addEventListener('click', (e) => {
         e.preventDefault();
         if (collapsedById.has(comment.id)) collapsedById.delete(comment.id);
@@ -1462,6 +1505,7 @@ export function renderCommentTree(
 
     const body = document.createElement('div');
     body.className = 'comment-body';
+    body.id = bodyId;
     body.appendChild(sanitizeHtmlToFragment(comment.bodyHtml));
     wrapper.appendChild(body);
 

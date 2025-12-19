@@ -380,7 +380,6 @@
 .drawer-select:focus,
 .drawer-input:focus {
     border-color: var(--accent-color);
-    outline: none;
 }
 
 .drawer-slider {
@@ -389,6 +388,11 @@
     height: 4px;
     background: var(--border-color);
     border-radius: 2px;
+}
+
+.drawer-select:focus:not(:focus-visible),
+.drawer-input:focus:not(:focus-visible),
+.drawer-slider:focus:not(:focus-visible) {
     outline: none;
 }
 
