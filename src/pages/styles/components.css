@@ -20,6 +20,25 @@
     display: none !important;
 }
 
+.skip-link {
+    position: absolute;
+    top: -40px;
+    left: 12px;
+    z-index: 1001;
+    padding: 8px 12px;
+    background: var(--toolbar-bg);
+    color: var(--text-color);
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    text-decoration: none;
+    font-weight: 600;
+    transition: top var(--dur-1) var(--ease-standard);
+}
+
+.skip-link:focus {
+    top: 12px;
+}
+
 /* --- Premium Toolbar & Drawer --- */
 #reader-toolbar {
     position: fixed;

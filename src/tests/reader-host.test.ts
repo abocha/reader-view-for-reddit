@@ -93,6 +93,18 @@ describe('Reader Host Logic', () => {
             expect(img?.hasAttribute('data-x')).toBe(false);
         });
 
+        it('should keep spoiler class only when allowed', () => {
+            const input = '<span class="md-spoiler-text extra">Spoil</span><span class="other">Hide</span>';
+            const fragment = sanitizeHtmlToFragment(input);
+            const div = document.createElement('div');
+            div.appendChild(fragment);
+
+            const spoiler = div.querySelector('span.md-spoiler-text');
+            const other = div.querySelector('span.other');
+            expect(spoiler?.textContent).toBe('Spoil');
+            expect(other).toBeNull();
+        });
+
 	        it('should normalize and sanitize links', () => {
 	            const input = [
 	                '<a href="/user/test">Rel</a>',
@@ -314,7 +326,7 @@ describe('Reader Host Logic', () => {
     });
 
     describe('renderCommentTree actions', () => {
-        it('should wire up "show more" and "show low-score" buttons', () => {
+        it('should wire up "show more" and low-score reveal buttons', () => {
             const wrapper = renderCommentTree(
                 {
                     id: 'p',
@@ -323,17 +335,26 @@ describe('Reader Host Logic', () => {
                     bodyHtml: '<p>p</p>',
                     replies: [
                         { id: 'low', author: 'low', bodyMarkdown: 'low', bodyHtml: '<p>low</p>', score: -10, replies: [] },
-                        { id: 'deep', author: 'deep', bodyMarkdown: 'deep', bodyHtml: '<p>deep</p>', score: 1, replies: [] },
+                        {
+                            id: 'deep',
+                            author: 'deep',
+                            bodyMarkdown: 'deep',
+                            bodyHtml: '<p>deep</p>',
+                            score: 1,
+                            replies: [
+                                { id: 'child', author: 'child', bodyMarkdown: 'child', bodyHtml: '<p>child</p>', score: 1, replies: [] },
+                            ],
+                        },
                     ],
                 } as any,
-                { depthLimit: 0, autoDepth: false, hideLow: true, promotedPathIds: new Set() },
+                { depthLimit: 1, autoDepth: false, hideLow: true, promotedPathIds: new Set() },
                 0,
                 false,
             );
 
             const buttons = Array.from(wrapper.querySelectorAll('button')) as HTMLButtonElement[];
             const showMore = buttons.find(b => b.textContent?.includes('Show') && b.textContent.includes('more replies'));
-            const showLow = buttons.find(b => b.textContent?.includes('low-score replies'));
+            const showLow = buttons.find(b => b.textContent?.includes('low-score comment'));
 
             expect(showMore).toBeTruthy();
             expect(showLow).toBeTruthy();

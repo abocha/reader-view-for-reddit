@@ -34,7 +34,10 @@ describe('Loading states', () => {
             <input id="comments-auto-depth" type="checkbox" checked />
             <input id="comments-hide-low" type="checkbox" checked />
             <select id="comments-limit"><option value="100" selected>100</option></select>
-            <select id="comments-sort"><option value="top">Top</option></select>
+            <select id="comments-sort">
+                <option value="best" selected>Best</option>
+                <option value="top">Top</option>
+            </select>
             <input id="toggle-comments-switch" type="checkbox" checked />
             <section id="comments"></section>
             <div id="comments-status"></div>

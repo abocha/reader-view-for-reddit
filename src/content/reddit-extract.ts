@@ -10,6 +10,8 @@ export interface RedditPostPayload {
     thumbnail?: string;
     permalink?: string;
     postId?: string;
+    nsfw?: boolean;
+    spoiler?: boolean;
     media?: {
         type: 'image' | 'gallery' | 'video';
         url: string;
@@ -158,6 +160,8 @@ export async function extractRedditPost(): Promise<ExtractionResult> {
                         thumbnail: finalPost.thumbnail, // 'default', 'self', or URL
                         permalink: finalPost.permalink,
                         postId: finalPost.id,
+                        nsfw: Boolean(finalPost.over_18),
+                        spoiler: Boolean(finalPost.spoiler),
                         media,
                     }
                 };
@@ -203,7 +207,9 @@ export async function extractRedditPost(): Promise<ExtractionResult> {
                 bodyHtml: bodyHtml,
                 bodyMarkdown: '',
                 isFallback: true,
-                url: loc.href
+                url: loc.href,
+                nsfw: false,
+                spoiler: false,
             }
         };
 

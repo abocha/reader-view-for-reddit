@@ -168,6 +168,8 @@ export async function fetchRedditPostPayloadFromJson(pageUrl: string): Promise<{
             thumbnail: finalPost.thumbnail,
             permalink: finalPost.permalink,
             postId: finalPost.id,
+            nsfw: Boolean(finalPost.over_18),
+            spoiler: Boolean(finalPost.spoiler),
             media,
         },
         meta: { endpoint: 'permalink', bytes, url: permalinkUrl },
@@ -240,6 +242,8 @@ function buildPayloadFromPostData(pageUrl: string, initialPost: RedditPostData):
         thumbnail: finalPost.thumbnail,
         permalink: finalPost.permalink,
         postId: finalPost.id,
+        nsfw: Boolean(finalPost.over_18),
+        spoiler: Boolean(finalPost.spoiler),
         media,
     };
 }

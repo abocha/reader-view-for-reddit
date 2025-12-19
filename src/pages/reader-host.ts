@@ -218,6 +218,7 @@ function renderLoadingShell(sourceUrl?: string | null) {
     const articleEl = document.getElementById('spike-article');
     if (!articleEl) return;
     initPreferences();
+    document.body.classList.remove('post-nsfw', 'post-spoiler');
     articleEl.replaceChildren();
 
     const header = document.createElement('header');
@@ -444,13 +445,22 @@ export function initPreferences() {
     const savedTheme = localStorage.getItem('reader-theme') || 'light';
     const savedFont = localStorage.getItem('reader-font') || 'serif';
     const savedAlign = localStorage.getItem('reader-align') || 'left';
+    const blurNsfw = (localStorage.getItem('reader-blur-nsfw') ?? 'true') === 'true';
+    const blurSpoilers = (localStorage.getItem('reader-blur-spoilers') ?? 'true') === 'true';
 
     // Apply classes
     document.body.classList.add(`theme-${savedTheme}`);
     document.body.classList.add(`font-${savedFont}`);
     document.body.classList.add(`align-${savedAlign}`);
+    document.body.classList.toggle('blur-nsfw', blurNsfw);
+    document.body.classList.toggle('blur-spoilers', blurSpoilers);
 
     updateActiveControls(savedTheme, savedFont, savedAlign);
+
+    const blurNsfwEl = document.getElementById('blur-nsfw-media') as HTMLInputElement | null;
+    if (blurNsfwEl) blurNsfwEl.checked = blurNsfw;
+    const blurSpoilersEl = document.getElementById('blur-spoilers') as HTMLInputElement | null;
+    if (blurSpoilersEl) blurSpoilersEl.checked = blurSpoilers;
 
     // 2. Global Event Delegation (Toolbar + Drawer)
     // We bind to document.body to catch clicks in both the toolbar and the drawer (since drawer is a sibling)
@@ -551,6 +561,18 @@ export function initPreferences() {
         const nextIndex = (index + (isNext ? 1 : -1) + radios.length) % radios.length;
         radios[nextIndex]?.click();
         radios[nextIndex]?.focus();
+    });
+
+    blurNsfwEl?.addEventListener('change', () => {
+        const enabled = blurNsfwEl.checked;
+        document.body.classList.toggle('blur-nsfw', enabled);
+        localStorage.setItem('reader-blur-nsfw', String(enabled));
+    });
+
+    blurSpoilersEl?.addEventListener('change', () => {
+        const enabled = blurSpoilersEl.checked;
+        document.body.classList.toggle('blur-spoilers', enabled);
+        localStorage.setItem('reader-blur-spoilers', String(enabled));
     });
 }
 
@@ -856,6 +878,7 @@ function renderErrorMode(msg: string, url?: string | null) {
 
     // Wire up theme even in error mode
     initPreferences();
+    document.body.classList.remove('post-nsfw', 'post-spoiler');
 
     articleEl.replaceChildren();
 
@@ -905,6 +928,8 @@ export function renderArticle(post: RedditPostPayload) {
     if (!articleEl) return;
 
     currentPost = post;
+    document.body.classList.toggle('post-nsfw', Boolean(post.nsfw));
+    document.body.classList.toggle('post-spoiler', Boolean(post.spoiler));
 
     articleEl.replaceChildren();
 
@@ -929,6 +954,20 @@ export function renderArticle(post: RedditPostPayload) {
         fallbackBadge.className = 'meta-pill fallback-badge';
         fallbackBadge.textContent = 'Extracted via Fallback';
         metaRow.appendChild(fallbackBadge);
+    }
+
+    if (post.nsfw) {
+        const nsfwBadge = document.createElement('span');
+        nsfwBadge.className = 'meta-pill nsfw-badge';
+        nsfwBadge.textContent = 'NSFW';
+        metaRow.appendChild(nsfwBadge);
+    }
+
+    if (post.spoiler) {
+        const spoilerBadge = document.createElement('span');
+        spoilerBadge.className = 'meta-pill spoiler-badge';
+        spoilerBadge.textContent = 'Spoiler';
+        metaRow.appendChild(spoilerBadge);
     }
 
     const parsedOriginalUrl = parseHttpUrl(post.url);
@@ -1027,6 +1066,7 @@ function scheduleEnhance(container: HTMLElement) {
         try {
             enhanceInlineMedia(container);
             enhanceInlineImages(container);
+            enhanceSpoilers(container);
         } catch {
             // ignore enhancement failures
         }
@@ -1039,6 +1079,32 @@ function scheduleEnhance(container: HTMLElement) {
         return;
     }
     window.setTimeout(run, 0);
+}
+
+function enhanceSpoilers(container: HTMLElement) {
+    const spoilers = Array.from(container.querySelectorAll<HTMLElement>('span.md-spoiler-text'));
+    for (const spoiler of spoilers) {
+        if (spoiler.dataset.rvrrSpoiler === '1') continue;
+        spoiler.dataset.rvrrSpoiler = '1';
+        spoiler.setAttribute('role', 'button');
+        spoiler.setAttribute('tabindex', '0');
+        spoiler.setAttribute('aria-pressed', 'false');
+        spoiler.setAttribute('aria-label', 'Reveal spoiler');
+        const toggle = () => {
+            const revealed = spoiler.classList.toggle('spoiler-revealed');
+            spoiler.setAttribute('aria-pressed', revealed ? 'true' : 'false');
+            spoiler.setAttribute('aria-label', revealed ? 'Hide spoiler' : 'Reveal spoiler');
+        };
+        spoiler.addEventListener('click', (e) => {
+            e.preventDefault();
+            toggle();
+        });
+        spoiler.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            e.preventDefault();
+            toggle();
+        });
+    }
 }
 
 export function renderMedia(post: RedditPostPayload): HTMLElement | null {
@@ -1345,7 +1411,7 @@ function getCommentsLimit(): number {
 
 function getCommentsSort(): string {
     const sortEl = document.getElementById('comments-sort') as HTMLSelectElement | null;
-    return sortEl?.value || 'top';
+    return sortEl?.value || 'best';
 }
 
 function buildCommentsJsonUrl(
@@ -1462,6 +1528,7 @@ export function renderCommentTree(
     settings: { depthLimit: number; autoDepth: boolean; hideLow: boolean; promotedPathIds: Set<string> },
     currentDepth: number,
     unlimitedDepth: boolean,
+    options?: { forceCollapsed?: boolean; lowScore?: boolean },
 ): HTMLElement {
     const wrapper = document.createElement('div');
     wrapper.className = 'comment';
@@ -1473,7 +1540,7 @@ export function renderCommentTree(
     const toggle = document.createElement('button');
     toggle.className = 'comment-toggle btn btn--ghost btn--sm';
     toggle.type = 'button';
-    const isCollapsed = collapsedById.has(comment.id);
+    const isCollapsed = Boolean(options?.forceCollapsed) || collapsedById.has(comment.id);
     toggle.textContent = isCollapsed ? '▸' : '▾';
     toggle.title = isCollapsed ? 'Expand' : 'Collapse';
     toggle.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
@@ -1482,6 +1549,11 @@ export function renderCommentTree(
     toggle.setAttribute('aria-controls', bodyId);
     toggle.addEventListener('click', (e) => {
         e.preventDefault();
+        if (options?.forceCollapsed && options?.lowScore) {
+            expandedLowScoreById.add(comment.id);
+            rerenderComments();
+            return;
+        }
         if (collapsedById.has(comment.id)) collapsedById.delete(comment.id);
         else collapsedById.add(comment.id);
         rerenderComments();
@@ -1500,6 +1572,17 @@ export function renderCommentTree(
         collapsed.className = 'comment-collapsed';
         collapsed.textContent = buildCommentSnippet(comment);
         wrapper.appendChild(collapsed);
+        if (options?.lowScore) {
+            const reveal = document.createElement('button');
+            reveal.className = 'action-btn btn btn--outline btn--sm';
+            reveal.type = 'button';
+            reveal.textContent = 'Show low-score comment';
+            reveal.addEventListener('click', () => {
+                expandedLowScoreById.add(comment.id);
+                rerenderComments();
+            });
+            wrapper.appendChild(reveal);
+        }
         return wrapper;
     }
 
@@ -1515,7 +1598,7 @@ export function renderCommentTree(
     repliesEl.className = 'comment-replies';
 
     const thisSubtreeUnlimited = unlimitedDepth || expandedMoreById.has(comment.id);
-    const { visible, hiddenDepthCount, hiddenLowScoreCount } = selectVisibleChildren(
+    const { visible, lowScoreCollapsed, hiddenDepthCount } = selectVisibleChildren(
         comment,
         comment.replies,
         currentDepth + 1,
@@ -1528,6 +1611,9 @@ export function renderCommentTree(
     for (const child of visible) {
         repliesEl.appendChild(renderCommentTree(child, settings, currentDepth + 1, thisSubtreeUnlimited));
     }
+    for (const child of lowScoreCollapsed) {
+        repliesEl.appendChild(renderCommentTree(child, settings, currentDepth + 1, thisSubtreeUnlimited, { forceCollapsed: true, lowScore: true }));
+    }
 
     const actions = document.createElement('div');
     actions.className = 'comment-actions';
@@ -1539,18 +1625,6 @@ export function renderCommentTree(
         btn.textContent = `Show ${hiddenDepthCount} more replies`;
         btn.addEventListener('click', () => {
             expandedMoreById.add(comment.id);
-            rerenderComments();
-        });
-        actions.appendChild(btn);
-    }
-
-    if (hiddenLowScoreCount > 0) {
-        const btn = document.createElement('button');
-        btn.className = 'action-btn btn btn--outline btn--sm';
-        btn.type = 'button';
-        btn.textContent = `Show ${hiddenLowScoreCount} low-score replies`;
-        btn.addEventListener('click', () => {
-            expandedLowScoreById.add(comment.id);
             rerenderComments();
         });
         actions.appendChild(btn);
@@ -1736,35 +1810,32 @@ function selectVisibleChildren(
     hideLow: boolean,
     promotedPathIds: Set<string>,
     unlimitedDepth: boolean,
-): { visible: CommentNode[]; hiddenDepthCount: number; hiddenLowScoreCount: number } {
-    const showLow = expandedLowScoreById.has(parent.id);
-
+): { visible: CommentNode[]; lowScoreCollapsed: CommentNode[]; hiddenDepthCount: number } {
     const visible: CommentNode[] = [];
+    const lowScoreCollapsed: CommentNode[] = [];
     let hiddenDepthCount = 0;
-    let hiddenLowScoreCount = 0;
 
     for (const child of children) {
         const score = typeof child.score === 'number' ? child.score : 0;
-        const isLow = hideLow && score <= -3 && !showLow;
+        const isLow = hideLow && score <= -3 && !expandedLowScoreById.has(child.id);
 
         const withinDepth = depth <= depthLimit;
         const promoted = promotedPathIds.has(child.id);
         const visibleByDepth = unlimitedDepth || withinDepth || promoted;
-
-        if (isLow) {
-            hiddenLowScoreCount += 1;
-            continue;
-        }
 
         if (!visibleByDepth) {
             hiddenDepthCount += 1;
             continue;
         }
 
-        visible.push(child);
+        if (isLow) {
+            lowScoreCollapsed.push(child);
+        } else {
+            visible.push(child);
+        }
     }
 
-    return { visible, hiddenDepthCount, hiddenLowScoreCount };
+    return { visible, lowScoreCollapsed, hiddenDepthCount };
 }
 
 export function buildPostMarkdown(post: RedditPostPayload): string {
@@ -1985,6 +2056,7 @@ function sanitizeAttributes(element: Element, tag: string) {
         a: new Set(['href', 'title']),
         code: new Set(['class']),
         pre: new Set(['class']),
+        span: new Set(['class']),
         img: new Set(['src', 'alt', 'title', 'width', 'height', 'loading']),
     };
     const allowedAttrs = allowedAttrsByTag[tag] ?? new Set<string>();
@@ -2031,6 +2103,15 @@ function sanitizeAttributes(element: Element, tag: string) {
                 element.setAttribute('rel', 'noopener noreferrer');
                 element.setAttribute('target', '_blank');
             }
+        }
+    }
+
+    if (tag === 'span') {
+        const classAttr = element.getAttribute('class') || '';
+        if (!classAttr.split(/\s+/).includes('md-spoiler-text')) {
+            element.removeAttribute('class');
+        } else {
+            element.setAttribute('class', 'md-spoiler-text');
         }
     }
 }

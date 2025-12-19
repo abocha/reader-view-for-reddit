@@ -74,6 +74,18 @@
     border-color: color-mix(in srgb, rgba(160, 82, 45, 0.35) 55%, var(--border-color));
 }
 
+.meta-pill.nsfw-badge {
+    background: color-mix(in srgb, rgba(220, 38, 38, 0.18) 70%, var(--toolbar-bg));
+    border-color: color-mix(in srgb, rgba(220, 38, 38, 0.45) 55%, var(--border-color));
+    color: color-mix(in srgb, var(--text-color) 70%, rgb(220, 38, 38));
+}
+
+.meta-pill.spoiler-badge {
+    background: color-mix(in srgb, rgba(234, 179, 8, 0.18) 70%, var(--toolbar-bg));
+    border-color: color-mix(in srgb, rgba(234, 179, 8, 0.45) 55%, var(--border-color));
+    color: color-mix(in srgb, var(--text-color) 70%, rgb(234, 179, 8));
+}
+
 .meta-pill.original-link {
     max-width: min(100%, 28ch);
     background: color-mix(in srgb, var(--accent-color) 12%, var(--toolbar-bg));
@@ -93,6 +105,30 @@
     color: var(--accent-color);
     border-color: color-mix(in srgb, var(--accent-color) 24%, var(--border-color));
     border-bottom-color: currentColor;
+}
+
+.post-nsfw.blur-nsfw .thumb-img,
+.post-nsfw.blur-nsfw .inline-media-img,
+.post-nsfw.blur-nsfw .media-thumb-img,
+.post-spoiler.blur-spoilers .thumb-img,
+.post-spoiler.blur-spoilers .inline-media-img,
+.post-spoiler.blur-spoilers .media-thumb-img {
+    filter: blur(12px);
+}
+
+.blur-spoilers .md-spoiler-text {
+    background: color-mix(in srgb, var(--border-color) 40%, transparent);
+    color: transparent;
+    text-shadow: 0 0 10px var(--text-color);
+    border-radius: 4px;
+    padding: 0 3px;
+    cursor: pointer;
+}
+
+.blur-spoilers .md-spoiler-text.spoiler-revealed {
+    background: transparent;
+    color: inherit;
+    text-shadow: none;
 }
 
 /* Inline / thumbnail media */

@@ -31,7 +31,10 @@ import browser from 'webextension-polyfill';
                 <input id="comments-auto-depth" type="checkbox" checked />
                 <input id="comments-hide-low" type="checkbox" />
                 <select id="comments-limit"><option value="100" selected>100</option></select>
-                <select id="comments-sort"><option value="top">Top</option></select>
+                <select id="comments-sort">
+                    <option value="best" selected>Best</option>
+                    <option value="top">Top</option>
+                </select>
                 <div id="toggle-drawer"></div>
                 <div id="close-drawer"></div>
                 <button id="copy-post-md"></button>

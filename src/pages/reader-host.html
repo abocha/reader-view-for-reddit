@@ -11,6 +11,7 @@
 </head>
 
 <body>
+    <a class="skip-link" href="#comments-title">Skip to comments</a>
     <div id="reader-toolbar" class="toolbar-pill" role="toolbar" aria-label="Reader controls">
         <!-- Row 1: Appearance -->
         <div class="toolbar-row">
@@ -126,11 +127,24 @@
                     <option value="500">500</option>
                 </select>
                 <select id="comments-sort" class="drawer-select-sm" aria-label="Comments sort">
+                    <option value="best" selected>Best</option>
                     <option value="top">Top</option>
                     <option value="new">New</option>
                     <option value="old">Old</option>
                     <option value="controversial">Controversial</option>
                 </select>
+            </div>
+        </div>
+
+        <div class="drawer-section">
+            <label class="drawer-label">Content</label>
+            <div class="drawer-checkbox">
+                <input id="blur-nsfw-media" type="checkbox" checked />
+                <label for="blur-nsfw-media">Blur NSFW media</label>
+            </div>
+            <div class="drawer-checkbox">
+                <input id="blur-spoilers" type="checkbox" checked />
+                <label for="blur-spoilers">Blur spoilers</label>
             </div>
         </div>
 
