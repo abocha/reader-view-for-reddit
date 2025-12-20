@@ -95,7 +95,8 @@ describe('Reader UI Rendering', () => {
             const el = renderMedia(post);
 
             expect(el?.textContent).toContain('Video');
-            expect(el?.textContent).toContain('Open video in a new tab');
+            const link = el?.querySelector('.media-link') as HTMLAnchorElement | null;
+            expect(link?.textContent).toBe('View on Reddit');
             expect(el?.querySelector('img')).toBeNull(); // No inline player
         });
     });

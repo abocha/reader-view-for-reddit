@@ -102,77 +102,8 @@ export async function fetchRedditPostPayloadFromJson(pageUrl: string): Promise<{
     const initialPost: RedditPostData | undefined = getInitialPostFromPermalinkListing(data);
     if (!initialPost) throw new Error('Missing post data');
 
-    const isCrosspost = Array.isArray(initialPost.crosspost_parent_list) && initialPost.crosspost_parent_list.length > 0;
-    const finalPost: RedditPostData = isCrosspost ? initialPost.crosspost_parent_list[0] : initialPost;
-
-    const bodyMarkdown = finalPost.selftext || '';
-    let bodyHtml = finalPost.selftext_html || '';
-    if (!bodyHtml && bodyMarkdown) bodyHtml = `<pre>${escapeHtml(bodyMarkdown)}</pre>`;
-    bodyHtml = cleanRedditHtml(bodyHtml);
-
-    const subreddit = isCrosspost
-        ? `${initialPost.subreddit_name_prefixed} 🔀 ${finalPost.subreddit_name_prefixed}`
-        : initialPost.subreddit_name_prefixed;
-
-    let media: RedditPostPayload['media'] = undefined;
-
-    if (finalPost.is_gallery && finalPost.gallery_data?.items && finalPost.media_metadata) {
-        const items = finalPost.gallery_data.items as Array<{ media_id?: string }>;
-        const firstId = items?.[0]?.media_id;
-        const first = firstId ? finalPost.media_metadata[firstId] : null;
-        const firstUrl = tryHttpUrl(first?.s?.u);
-        const firstThumb = tryHttpUrl(first?.p?.[0]?.u);
-        if (firstUrl) {
-            media = {
-                type: 'gallery',
-                url: firstUrl,
-                thumbnailUrl: firstThumb || undefined,
-                galleryCount: items?.length || undefined,
-            };
-        }
-    }
-
-    if (!media && finalPost.is_video) {
-        const videoUrl =
-            tryHttpUrl(finalPost.secure_media?.reddit_video?.fallback_url) ||
-            tryHttpUrl(finalPost.media?.reddit_video?.fallback_url);
-        if (videoUrl) media = { type: 'video', url: videoUrl };
-    }
-
-    if (!media) {
-        const previewUrl =
-            tryHttpUrl(finalPost.preview?.images?.[0]?.source?.url) ||
-            tryHttpUrl(finalPost.url_overridden_by_dest);
-        const previewThumb =
-            tryHttpUrl(finalPost.preview?.images?.[0]?.resolutions?.[0]?.url) ||
-            tryHttpUrl(finalPost.thumbnail);
-        if (previewUrl && (finalPost.post_hint === 'image' || finalPost.preview?.images?.length)) {
-            media = {
-                type: 'image',
-                url: previewUrl,
-                thumbnailUrl: previewThumb || undefined,
-            };
-        }
-    }
-
     return {
-        payload: {
-            title: initialPost.title || 'Reddit Post',
-            author: initialPost.author || 'unknown',
-            subreddit: subreddit || 'r/reddit',
-            bodyHtml,
-            bodyMarkdown,
-            isFallback: false,
-            url: pageUrl,
-            linkUrl: finalPost.url_overridden_by_dest,
-            thumbnail: finalPost.thumbnail,
-            permalink: finalPost.permalink,
-            postId: finalPost.id,
-            nsfw: Boolean(finalPost.over_18),
-            spoiler: Boolean(finalPost.spoiler),
-            score: typeof finalPost.score === 'number' ? finalPost.score : undefined,
-            media,
-        },
+        payload: buildPayloadFromPostData(pageUrl, initialPost),
         meta: { endpoint: 'permalink', bytes, url: permalinkUrl },
     };
 }

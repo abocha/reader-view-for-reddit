@@ -52,7 +52,7 @@ This repo uses a build step (TypeScript + bundling), so AMO requires submitting 
 - Install Node.js 22: https://nodejs.org/
 - Enable/install pnpm:
   - `corepack enable`
-  - `corepack prepare pnpm@10.25.0 --activate`
+  - `corepack prepare pnpm@10.26.0 --activate`
 
 ### Reproducible Build (produces `dist/`)
 

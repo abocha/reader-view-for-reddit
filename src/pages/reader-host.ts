@@ -265,60 +265,73 @@ async function waitForPendingPayload(expectedTraceId: string, hostEvents: Return
 
     let resolved = false;
     const pendingKey = `pending_token:${expectedTraceId}`;
+    let timeoutId: number;
+    let intervalId: number;
+    let onMsg: (msg: unknown) => void = () => undefined;
+
+    const cleanup = () => {
+        window.clearTimeout(timeoutId);
+        window.clearInterval(intervalId);
+        browser.runtime.onMessage.removeListener(onMsg as any);
+    };
+
+    const extractPendingToken = (value: unknown): string | null => {
+        if (typeof value === 'string') return value;
+        if (value && typeof value === 'object') {
+            const token = (value as any).token;
+            if (typeof token === 'string' && token) return token;
+        }
+        return null;
+    };
+
+    const resolveWithToken = async (token: string, via: 'storage' | 'message') => {
+        if (resolved) return;
+        resolved = true;
+        cleanup();
+        hostEvents.push(waitSpan.end({ ok: true, via }));
+        persistTokenInUrl(token, expectedTraceId);
+        try { await browser.storage.session.remove(pendingKey); } catch { /* ignore */ }
+        void initTokenProtocol(token, hostEvents);
+    };
+
+    const resolveError = async (reason: 'timeout' | 'error', message: string) => {
+        if (resolved) return;
+        resolved = true;
+        cleanup();
+        hostEvents.push(waitSpan.end({ ok: false, reason }));
+        try { await browser.storage.session.remove(pendingKey); } catch { /* ignore */ }
+        renderErrorMode(message);
+    };
 
     const tryStorage = async () => {
         try {
             const data = await browser.storage.session.get(pendingKey);
-            const token = data?.[pendingKey] as string | undefined;
-            if (!token || typeof token !== 'string') return;
-            if (resolved) return;
-            resolved = true;
-            window.clearTimeout(timeout);
-            window.clearInterval(interval);
-            hostEvents.push(waitSpan.end({ ok: true, via: 'storage' }));
-            persistTokenInUrl(token, expectedTraceId);
-            try { await browser.storage.session.remove(pendingKey); } catch { /* ignore */ }
-            void initTokenProtocol(token, hostEvents);
+            const token = extractPendingToken(data?.[pendingKey]);
+            if (!token) return;
+            await resolveWithToken(token, 'storage');
         } catch {
             // ignore
         }
     };
-    const timeout = window.setTimeout(() => {
-        if (resolved) return;
-        resolved = true;
-        hostEvents.push(waitSpan.end({ ok: false, reason: 'timeout' }));
-        renderErrorMode('Timed out waiting for article data. Please try again.');
+    timeoutId = window.setTimeout(() => {
+        void resolveError('timeout', 'Timed out waiting for article data. Please try again.');
     }, 12000);
 
     // Poll storage to avoid missing a one-shot runtime message.
-    const interval = window.setInterval(() => void tryStorage(), 200);
+    intervalId = window.setInterval(() => void tryStorage(), 200);
     void tryStorage();
 
-    const onMsg = (msg: unknown) => {
+    onMsg = (msg: unknown) => {
         if (!msg || typeof msg !== 'object') return;
         const type = (msg as any).type;
         if (type === 'HOST_PAYLOAD_READY' && (msg as any).traceId === expectedTraceId) {
             const token = (msg as any).token as string | undefined;
             if (!token) return;
-            if (resolved) return;
-            resolved = true;
-            window.clearTimeout(timeout);
-            window.clearInterval(interval);
-            hostEvents.push(waitSpan.end({ ok: true, via: 'message' }));
-            browser.runtime.onMessage.removeListener(onMsg as any);
-            persistTokenInUrl(token, expectedTraceId);
-            try { void browser.storage.session.remove(pendingKey); } catch { /* ignore */ }
-            void initTokenProtocol(token, hostEvents);
+            void resolveWithToken(token, 'message');
             return;
         }
         if (type === 'HOST_PAYLOAD_ERROR' && (msg as any).traceId === expectedTraceId) {
-            if (resolved) return;
-            resolved = true;
-            window.clearTimeout(timeout);
-            window.clearInterval(interval);
-            hostEvents.push(waitSpan.end({ ok: false, reason: 'error' }));
-            browser.runtime.onMessage.removeListener(onMsg as any);
-            renderErrorMode((msg as any).error || 'Failed to load article.');
+            void resolveError('error', (msg as any).error || 'Failed to load article.');
         }
     };
 
@@ -1423,7 +1436,7 @@ function setCommentsVisibility(visible: boolean) {
 }
 
 function getCommentsDepth(): number {
-    const depthEl = document.getElementById('comments-depth') as HTMLSelectElement | null;
+    const depthEl = document.getElementById('comments-depth') as HTMLInputElement | null;
     const parsed = Number.parseInt(depthEl?.value ?? '1', 10);
     if (!Number.isFinite(parsed)) return 1;
     return Math.min(5, Math.max(0, parsed));
@@ -2113,6 +2126,13 @@ function sanitizeAttributes(element: Element, tag: string) {
     if (tag === 'a') {
         const href = element.getAttribute('href');
         if (href) {
+            if (href.startsWith('//')) {
+                const resolved = `https:${href}`;
+                element.setAttribute('href', resolved);
+                element.setAttribute('rel', 'noopener noreferrer');
+                element.setAttribute('target', '_blank');
+                return;
+            }
             // Support Reddit-relative links (e.g. /user/... /message/compose/...) by resolving to reddit.com.
             if (href.startsWith('/')) {
                 const resolved = new URL(href, 'https://www.reddit.com');
@@ -2149,6 +2169,19 @@ function sanitizeAttributes(element: Element, tag: string) {
             element.removeAttribute('class');
         } else {
             element.setAttribute('class', 'md-spoiler-text');
+        }
+    }
+
+    if (tag === 'img') {
+        const src = element.getAttribute('src');
+        if (!src) return;
+        if (src.startsWith('//')) {
+            element.setAttribute('src', `https:${src}`);
+            return;
+        }
+        if (src.startsWith('/')) {
+            const resolved = new URL(src, 'https://www.reddit.com');
+            element.setAttribute('src', resolved.toString());
         }
     }
 }

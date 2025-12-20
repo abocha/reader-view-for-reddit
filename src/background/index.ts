@@ -3,6 +3,7 @@ import { extractRedditPost, ExtractionResult, RedditPostPayload } from '../conte
 import { fetchRedditPostPayloadFromJson } from './reddit-json';
 import { perf, PerfReport, summarize } from '../perf/trace';
 import { recordSessionToken } from '../shared/session-token-cache';
+import { normalizeRedditPostCacheKey } from './cache-keys';
 
 // --- Core Logic ---
 
@@ -17,18 +18,59 @@ const COMMENTS_CACHE_MAX = 10;
 const COMMENTS_CACHE_MAX_BYTES = 8_000_000; // approx JSON length (in-memory cap)
 const commentsCache = new Map<string, { value: unknown; expiresAt: number }>();
 
-function isRedditHostname(hostname: string): boolean {
-    return hostname === 'reddit.com' || hostname.endsWith('.reddit.com');
-}
+const SHOULD_RECORD_PERF = typeof __DEV__ !== 'undefined' && __DEV__;
 
-function normalizeRedditPostCacheKey(pageUrl: string): string | null {
+const PENDING_TOKEN_TTL_MS = 5 * 60 * 1000;
+const PENDING_CLEANUP_INTERVAL_MS = 30 * 1000;
+let lastPendingCleanupAt = 0;
+
+type PendingTokenEntry = {
+    token: string;
+    createdAt: number;
+};
+
+async function cleanupPendingTokens() {
+    const now = Date.now();
+    if (now - lastPendingCleanupAt < PENDING_CLEANUP_INTERVAL_MS) return;
+    lastPendingCleanupAt = now;
+
     try {
-        const url = new URL(pageUrl);
-        if (!isRedditHostname(url.hostname) || !url.pathname.includes('/comments/')) return null;
-        const path = url.pathname.replace(/\/$/, '');
-        return `${url.origin}${path}`;
+        const data = await browser.storage.session.get(null);
+        const updates: Record<string, PendingTokenEntry> = {};
+        const remove: string[] = [];
+        for (const [key, value] of Object.entries(data)) {
+            if (!key.startsWith('pending_token:')) continue;
+            if (typeof value === 'string') {
+                if (!value) {
+                    remove.push(key);
+                    continue;
+                }
+                updates[key] = { token: value, createdAt: now };
+                continue;
+            }
+            if (!value || typeof value !== 'object') {
+                remove.push(key);
+                continue;
+            }
+            const token = (value as any).token;
+            const createdAt = Number((value as any).createdAt);
+            if (typeof token !== 'string' || !token || !Number.isFinite(createdAt)) {
+                remove.push(key);
+                continue;
+            }
+            if (now - createdAt > PENDING_TOKEN_TTL_MS) {
+                remove.push(key);
+            }
+        }
+
+        if (Object.keys(updates).length > 0) {
+            await browser.storage.session.set(updates);
+        }
+        if (remove.length > 0) {
+            await browser.storage.session.remove(remove);
+        }
     } catch {
-        return null;
+        // ignore cleanup failures
     }
 }
 
@@ -182,12 +224,14 @@ export async function processTab(tab: Tabs.Tab) {
         const token = crypto.randomUUID();
         const storeSpan = perf.span('session_set');
         const pendingKey = `pending_token:${traceId}`;
+        const pendingEntry: PendingTokenEntry = { token, createdAt: Date.now() };
         await browser.storage.session.set({
             [token]: payload,
-            [pendingKey]: token,
+            [pendingKey]: pendingEntry,
         });
         events.push(storeSpan.startEvent, storeSpan.end());
         await recordSessionToken(token, tab.url);
+        void cleanupPendingTokens();
 
         // 3. Open Host Page (or hydrate the already-opened pending host).
         if (openMode === 'new-tab' && pendingTraceId) {
@@ -198,8 +242,9 @@ export async function processTab(tab: Tabs.Tab) {
             }
         } else {
             const navSpan = perf.span('open_host_page', { openMode });
+            events.push(navSpan.startEvent);
             await openHostPage(tab.id, token, openMode, traceId, tab.url);
-            events.push(navSpan.startEvent, navSpan.end());
+            events.push(navSpan.end());
         }
 
         events.push(perf.event('processTab:end'));
@@ -319,9 +364,11 @@ export async function openReaderViewForUrl(url: string) {
         const token = crypto.randomUUID();
         const storeSpan = perf.span('session_set');
         const pendingKey = `pending_token:${traceId}`;
-        await browser.storage.session.set({ [token]: payload, [pendingKey]: token });
+        const pendingEntry: PendingTokenEntry = { token, createdAt: Date.now() };
+        await browser.storage.session.set({ [token]: payload, [pendingKey]: pendingEntry });
         events.push(storeSpan.startEvent, storeSpan.end());
         await recordSessionToken(token, url);
+        void cleanupPendingTokens();
 
         try {
             await browser.runtime.sendMessage({ type: 'HOST_PAYLOAD_READY', traceId, token });
@@ -352,64 +399,6 @@ async function openErrorHost(sourceTab: Tabs.Tab, errorMsg: string) {
         return;
     }
     await browser.tabs.update(sourceTab.id, { url: hostUrl, active: true });
-}
-
-async function showInPageToast(tabId: number, message: string) {
-    const func = (text: string) => {
-        const existing = document.getElementById('__reader_view_for_reddit_toast');
-        existing?.remove();
-
-        const toast = document.createElement('div');
-        toast.id = '__reader_view_for_reddit_toast';
-        toast.style.cssText = [
-            'position: fixed',
-            'right: 16px',
-            'bottom: 16px',
-            'z-index: 2147483647',
-            'max-width: 360px',
-            'padding: 12px 14px',
-            'border-radius: 10px',
-            'background: rgba(17, 24, 39, 0.92)',
-            'color: white',
-            'font: 13px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-            'box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25)',
-        ].join(';');
-
-        const title = document.createElement('div');
-        title.textContent = 'Reader View for Reddit';
-        title.style.cssText = 'font-weight: 700; margin-bottom: 4px;';
-
-        const body = document.createElement('div');
-        body.textContent = `Reader View Error: ${text}`;
-
-        const close = document.createElement('button');
-        close.type = 'button';
-        close.textContent = '×';
-        close.setAttribute('aria-label', 'Close');
-        close.style.cssText = [
-            'border: none',
-            'background: transparent',
-            'color: white',
-            'font-size: 18px',
-            'line-height: 1',
-            'cursor: pointer',
-            'position: absolute',
-            'top: 10px',
-            'right: 12px',
-        ].join(';');
-        close.addEventListener('click', () => toast.remove());
-
-        toast.append(title, body, close);
-        document.documentElement.appendChild(toast);
-
-        window.setTimeout(() => toast.remove(), 4000);
-    };
-
-    await browser.scripting.executeScript({
-        target: { tabId },
-        func,
-        args: [message],
-    });
 }
 
 // --- Listeners ---
@@ -466,14 +455,10 @@ browser.menus.onClicked.addListener((info, tab) => {
     }
 });
 
-export const __test__ = {
-    showInPageToast,
-    normalizeRedditPostCacheKey,
-};
-
 type StoredTrace = PerfReport & { createdAt: number };
 
 async function recordPerf(report: PerfReport) {
+    if (!SHOULD_RECORD_PERF) return;
     const entry: StoredTrace = { ...report, createdAt: Date.now() };
     try {
         const existing = await browser.storage.local.get('perf_traces');
@@ -523,9 +508,11 @@ if (browser.runtime?.onMessage?.addListener) {
                 const token = crypto.randomUUID();
                 const storeSpan = perf.span('session_set');
                 const pendingKey = `pending_token:${traceId}`;
-                await browser.storage.session.set({ [token]: payload, [pendingKey]: token });
+                const pendingEntry: PendingTokenEntry = { token, createdAt: Date.now() };
+                await browser.storage.session.set({ [token]: payload, [pendingKey]: pendingEntry });
                 events.push(storeSpan.startEvent, storeSpan.end());
                 await recordSessionToken(token, url);
+                void cleanupPendingTokens();
 
                 try {
                     await browser.runtime.sendMessage({ type: 'HOST_PAYLOAD_READY', traceId, token });

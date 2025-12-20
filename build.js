@@ -26,6 +26,9 @@ async function build() {
         target: ['firefox142'], // MV3 Firefox target
         sourcemap: isDev ? 'inline' : false,
         minify: !isDev,
+        define: {
+            __DEV__: JSON.stringify(isDev),
+        },
         logLevel: 'info',
     });
 

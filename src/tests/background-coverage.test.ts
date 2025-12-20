@@ -174,7 +174,7 @@ describe('Background Script Coverage', () => {
         it('should inject and render an in-page toast', async () => {
             vi.useFakeTimers();
 
-            const { __test__ } = await import('../background/index');
+            const { __test__ } = await import('../background/test-helpers');
             (browser.scripting.executeScript as any).mockImplementation(async ({ func, args }: any) => {
                 func(...(args ?? []));
                 return [{ result: null }];
@@ -203,7 +203,7 @@ describe('Background Script Coverage', () => {
 
     describe('Reddit cache key helpers', () => {
         it('should reject lookalike hostnames', async () => {
-            const { __test__ } = await import('../background/index');
+            const { __test__ } = await import('../background/test-helpers');
 
             const bad = __test__.normalizeRedditPostCacheKey('https://reddit.com.evil.tld/r/test/comments/abc/post/');
             const bad2 = __test__.normalizeRedditPostCacheKey('https://notreddit.com/r/test/comments/abc/post/');

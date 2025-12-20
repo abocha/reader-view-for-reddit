@@ -52,15 +52,5 @@
             },
             "description": "Open current Reddit post in Reader View"
         }
-    },
-    "web_accessible_resources": [
-        {
-            "resources": [
-                "pages/reader-host.html"
-            ],
-            "matches": [
-                "<all_urls>"
-            ]
-        }
-    ]
+    }
 }
