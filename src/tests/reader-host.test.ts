@@ -387,6 +387,28 @@ describe('Reader Host Logic', () => {
             expect(collapsed?.textContent).toContain('Hello world');
         });
 
+        it('should collapse AutoModerator comments by default', () => {
+            __test__.collapsedById.clear();
+
+            const wrapper = renderCommentTree(
+                {
+                    id: 'c-auto',
+                    author: 'AutoModerator',
+                    bodyMarkdown: 'Please keep it civil.',
+                    bodyHtml: '<p>Please keep it civil.</p>',
+                    replies: [],
+                } as any,
+                { depthLimit: 5, autoDepth: false, hideLow: false, promotedPathIds: new Set() },
+                0,
+                false,
+            );
+
+            const collapsed = wrapper.querySelector('.comment-collapsed') as HTMLElement | null;
+            const toggle = wrapper.querySelector('.comment-toggle') as HTMLButtonElement | null;
+            expect(collapsed).not.toBeNull();
+            expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+        });
+
         it('should toggle collapse state on click', () => {
             __test__.collapsedById.clear();
             document.body.innerHTML = '<div id="comments-list"></div>';

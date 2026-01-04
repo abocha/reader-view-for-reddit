@@ -21,6 +21,7 @@ let commentsVisible = true;
 const expandedMoreById = new Set<string>();
 const expandedLowScoreById = new Set<string>();
 const collapsedById = new Set<string>();
+const autoModeratorExpandedById = new Set<string>();
 let traceId: string | null = null;
 let commentsAbort: AbortController | null = null;
 let commentsLoadSeq = 0;
@@ -1277,6 +1278,7 @@ async function loadComments() {
                     expandedMoreById.clear();
                     expandedLowScoreById.clear();
                     collapsedById.clear();
+                    autoModeratorExpandedById.clear();
 
                     setCommentsStatus(
                         statusEl,
@@ -1318,6 +1320,7 @@ async function loadComments() {
         expandedMoreById.clear();
         expandedLowScoreById.clear();
         collapsedById.clear();
+        autoModeratorExpandedById.clear();
 
         setCommentsStatus(
             statusEl,
@@ -1589,7 +1592,9 @@ export function renderCommentTree(
     const toggle = document.createElement('button');
     toggle.className = 'comment-toggle btn btn--ghost btn--sm';
     toggle.type = 'button';
-    const isCollapsed = Boolean(options?.forceCollapsed) || collapsedById.has(comment.id);
+    const isAutoModerator = comment.author.trim().toLowerCase() === 'automoderator';
+    const autoCollapsed = isAutoModerator && !autoModeratorExpandedById.has(comment.id);
+    const isCollapsed = Boolean(options?.forceCollapsed) || collapsedById.has(comment.id) || autoCollapsed;
     toggle.textContent = isCollapsed ? '▸' : '▾';
     toggle.title = isCollapsed ? 'Expand' : 'Collapse';
     toggle.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
@@ -1600,6 +1605,11 @@ export function renderCommentTree(
         e.preventDefault();
         if (options?.forceCollapsed && options?.lowScore) {
             expandedLowScoreById.add(comment.id);
+            rerenderComments();
+            return;
+        }
+        if (isAutoModerator && autoCollapsed) {
+            autoModeratorExpandedById.add(comment.id);
             rerenderComments();
             return;
         }
