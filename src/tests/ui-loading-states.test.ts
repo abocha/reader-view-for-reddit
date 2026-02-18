@@ -191,4 +191,100 @@ describe('Loading states', () => {
         expect(globalThis.fetch).toHaveBeenCalledTimes(2);
         expect(listEl.querySelectorAll('.comment').length).toBeGreaterThan(0);
     });
+
+    it('should keep existing comments visible when a filter refresh fails', async () => {
+        const { renderArticle, initCommentsUI } = await import('../pages/reader-host');
+
+        (globalThis.fetch as any) = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => [
+                    { kind: 'Listing', data: { children: [{ kind: 't3', data: { num_comments: 2 } }] } },
+                    {
+                        kind: 'Listing',
+                        data: {
+                            children: [
+                                {
+                                    kind: 't1',
+                                    data: {
+                                        id: 'c1',
+                                        author: 'tester',
+                                        body: 'Hello',
+                                        body_html: '<p>Hello</p>',
+                                        score: 3,
+                                        replies: '',
+                                    },
+                                },
+                            ],
+                        },
+                    },
+                ],
+            })
+            .mockResolvedValueOnce({ ok: false, status: 500 });
+
+        renderArticle({
+            title: 'Post',
+            author: 'me',
+            subreddit: 'r/test',
+            bodyHtml: '',
+            bodyMarkdown: 'md',
+            url: 'http://test.com',
+            isFallback: false,
+            permalink: '/r/test/123/post',
+        } as any);
+
+        initCommentsUI();
+        await new Promise(r => setTimeout(r, 0));
+
+        const listEl = document.getElementById('comments-list') as HTMLElement;
+        expect(listEl.querySelectorAll('.comment').length).toBeGreaterThan(0);
+
+        const sortEl = document.getElementById('comments-sort') as HTMLSelectElement;
+        sortEl.value = 'top';
+        sortEl.dispatchEvent(new Event('change'));
+        await new Promise(r => setTimeout(r, 0));
+
+        expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+        expect(listEl.querySelectorAll('.comment').length).toBeGreaterThan(0);
+        const status = document.getElementById('comments-status') as HTMLElement;
+        expect(status.textContent).toContain('Failed to load comments.');
+    });
+
+    it('should not re-show comments when hidden during an in-flight load', async () => {
+        const { renderArticle, initCommentsUI } = await import('../pages/reader-host');
+        const deferredFetch = deferred<any>();
+        (globalThis.fetch as any) = vi.fn(() => deferredFetch.promise);
+
+        renderArticle({
+            title: 'Post',
+            author: 'me',
+            subreddit: 'r/test',
+            bodyHtml: '',
+            bodyMarkdown: 'md',
+            url: 'http://test.com',
+            isFallback: false,
+            permalink: '/r/test/123/post',
+        } as any);
+
+        initCommentsUI();
+
+        const toggle = document.getElementById('toggle-comments-switch') as HTMLInputElement;
+        const section = document.getElementById('comments') as HTMLElement;
+        toggle.checked = false;
+        toggle.dispatchEvent(new Event('change'));
+
+        deferredFetch.resolve({
+            ok: true,
+            json: async () => [
+                { kind: 'Listing', data: { children: [{ kind: 't3', data: { num_comments: 0 } }] } },
+                { kind: 'Listing', data: { children: [] } },
+            ],
+        });
+
+        await new Promise(r => setTimeout(r, 0));
+        await new Promise(r => setTimeout(r, 0));
+
+        expect(section.hidden).toBe(true);
+    });
 });

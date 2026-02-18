@@ -4,131 +4,38 @@ import { fetchRedditPostPayloadFromJson } from './reddit-json';
 import { perf, PerfReport, summarize } from '../perf/trace';
 import { recordSessionToken } from '../shared/session-token-cache';
 import { normalizeRedditPostCacheKey } from './cache-keys';
+import { getCachedPayload, setCachedPayload } from './payload-cache';
+import { getCachedComments, setCachedComments } from './comments-cache';
+import { cleanupPendingTokens, PendingTokenEntry } from './pending-token-cleanup';
+import { installRuntimeMessageListener } from './runtime-messages';
 
 // --- Core Logic ---
 
 type OpenMode = 'same-tab' | 'new-tab';
 
-const PAYLOAD_CACHE_TTL_MS = 3 * 60 * 1000;
-const PAYLOAD_CACHE_MAX = 30;
-const payloadCache = new Map<string, { payload: unknown; expiresAt: number }>();
-
-const COMMENTS_CACHE_TTL_MS = 5 * 60 * 1000;
-const COMMENTS_CACHE_MAX = 10;
-const COMMENTS_CACHE_MAX_BYTES = 8_000_000; // approx JSON length (in-memory cap)
-const commentsCache = new Map<string, { value: unknown; expiresAt: number }>();
-
 const SHOULD_RECORD_PERF = typeof __DEV__ !== 'undefined' && __DEV__;
-
-const PENDING_TOKEN_TTL_MS = 5 * 60 * 1000;
-const PENDING_CLEANUP_INTERVAL_MS = 30 * 1000;
-let lastPendingCleanupAt = 0;
-
-type PendingTokenEntry = {
-    token: string;
-    createdAt: number;
-};
-
-async function cleanupPendingTokens() {
-    const now = Date.now();
-    if (now - lastPendingCleanupAt < PENDING_CLEANUP_INTERVAL_MS) return;
-    lastPendingCleanupAt = now;
-
-    try {
-        const data = await browser.storage.session.get(null);
-        const updates: Record<string, PendingTokenEntry> = {};
-        const remove: string[] = [];
-        for (const [key, value] of Object.entries(data)) {
-            if (!key.startsWith('pending_token:')) continue;
-            if (typeof value === 'string') {
-                if (!value) {
-                    remove.push(key);
-                    continue;
-                }
-                updates[key] = { token: value, createdAt: now };
-                continue;
-            }
-            if (!value || typeof value !== 'object') {
-                remove.push(key);
-                continue;
-            }
-            const token = (value as any).token;
-            const createdAt = Number((value as any).createdAt);
-            if (typeof token !== 'string' || !token || !Number.isFinite(createdAt)) {
-                remove.push(key);
-                continue;
-            }
-            if (now - createdAt > PENDING_TOKEN_TTL_MS) {
-                remove.push(key);
-            }
-        }
-
-        if (Object.keys(updates).length > 0) {
-            await browser.storage.session.set(updates);
-        }
-        if (remove.length > 0) {
-            await browser.storage.session.remove(remove);
-        }
-    } catch {
-        // ignore cleanup failures
-    }
-}
-
-function getCachedComments(key: string): unknown | null {
-    const entry = commentsCache.get(key);
-    if (!entry) return null;
-    if (Date.now() > entry.expiresAt) {
-        commentsCache.delete(key);
-        return null;
-    }
-    commentsCache.delete(key);
-    commentsCache.set(key, entry);
-    return entry.value;
-}
-
-function setCachedComments(key: string, value: unknown): { ok: boolean; reason?: string; bytes?: number } {
-    let bytes: number | undefined;
-    try {
-        bytes = JSON.stringify(value).length;
-        if (bytes > COMMENTS_CACHE_MAX_BYTES) return { ok: false, reason: 'too_large', bytes };
-    } catch {
-        return { ok: false, reason: 'not_serializable' };
-    }
-
-    commentsCache.set(key, { value, expiresAt: Date.now() + COMMENTS_CACHE_TTL_MS });
-    while (commentsCache.size > COMMENTS_CACHE_MAX) {
-        const oldestKey = commentsCache.keys().next().value as string | undefined;
-        if (!oldestKey) break;
-        commentsCache.delete(oldestKey);
-    }
-    return { ok: true, bytes };
-}
-
-function getCachedPayload(key: string): unknown | null {
-    const entry = payloadCache.get(key);
-    if (!entry) return null;
-    if (Date.now() > entry.expiresAt) {
-        payloadCache.delete(key);
-        return null;
-    }
-    // Refresh recency (simple LRU).
-    payloadCache.delete(key);
-    payloadCache.set(key, entry);
-    return entry.payload;
-}
-
-function setCachedPayload(key: string, payload: unknown) {
-    payloadCache.set(key, { payload, expiresAt: Date.now() + PAYLOAD_CACHE_TTL_MS });
-    while (payloadCache.size > PAYLOAD_CACHE_MAX) {
-        const oldestKey = payloadCache.keys().next().value as string | undefined;
-        if (!oldestKey) break;
-        payloadCache.delete(oldestKey);
-    }
-}
 
 export async function getOpenMode(): Promise<OpenMode> {
     const data = await browser.storage.sync.get('openMode');
     return data.openMode === 'new-tab' ? 'new-tab' : 'same-tab';
+}
+
+async function storePayloadForTrace(
+    traceId: string,
+    payload: RedditPostPayload,
+    sourceUrl: string,
+    events: ReturnType<typeof perf.event>[],
+): Promise<string> {
+    const token = crypto.randomUUID();
+    const pendingKey = `pending_token:${traceId}`;
+    const pendingEntry: PendingTokenEntry = { token, createdAt: Date.now() };
+    const storeSpan = perf.span('session_set');
+    events.push(storeSpan.startEvent);
+    await browser.storage.session.set({ [token]: payload, [pendingKey]: pendingEntry });
+    events.push(storeSpan.end());
+    await recordSessionToken(token, sourceUrl);
+    void cleanupPendingTokens();
+    return token;
 }
 
 export async function processTab(tab: Tabs.Tab) {
@@ -220,18 +127,8 @@ export async function processTab(tab: Tabs.Tab) {
             events.push(navSpan.end());
         }
 
-        // 2. Generate Token & Store Payload
-        const token = crypto.randomUUID();
-        const storeSpan = perf.span('session_set');
-        const pendingKey = `pending_token:${traceId}`;
-        const pendingEntry: PendingTokenEntry = { token, createdAt: Date.now() };
-        await browser.storage.session.set({
-            [token]: payload,
-            [pendingKey]: pendingEntry,
-        });
-        events.push(storeSpan.startEvent, storeSpan.end());
-        await recordSessionToken(token, tab.url);
-        void cleanupPendingTokens();
+        // 2. Generate token and persist payload + pending marker.
+        const token = await storePayloadForTrace(traceId, payload, tab.url, events);
 
         // 3. Open Host Page (or hydrate the already-opened pending host).
         if (openMode === 'new-tab' && pendingTraceId) {
@@ -361,14 +258,7 @@ export async function openReaderViewForUrl(url: string) {
         const { payload, method: extractMethod } = await extractPayloadWithFallback(url, events);
         events.push(extractOverall.end({ ok: true, method: extractMethod }));
 
-        const token = crypto.randomUUID();
-        const storeSpan = perf.span('session_set');
-        const pendingKey = `pending_token:${traceId}`;
-        const pendingEntry: PendingTokenEntry = { token, createdAt: Date.now() };
-        await browser.storage.session.set({ [token]: payload, [pendingKey]: pendingEntry });
-        events.push(storeSpan.startEvent, storeSpan.end());
-        await recordSessionToken(token, url);
-        void cleanupPendingTokens();
+        const token = await storePayloadForTrace(traceId, payload, url, events);
 
         try {
             await browser.runtime.sendMessage({ type: 'HOST_PAYLOAD_READY', traceId, token });
@@ -480,68 +370,36 @@ async function recordPerf(report: PerfReport) {
     }
 }
 
-if (browser.runtime?.onMessage?.addListener) {
-    browser.runtime.onMessage.addListener(async (msg: unknown) => {
-        if (!msg || typeof msg !== 'object') return;
-        const type = (msg as any).type;
-        if (type === 'PERF_REPORT') {
-            const report = (msg as any).report as PerfReport | undefined;
-            if (report && typeof report.traceId === 'string' && Array.isArray(report.events)) {
-                void recordPerf(report);
-            }
-            return;
+async function handleHostPayloadRequest(traceId: string, url: string): Promise<void> {
+    const events = [perf.event('host_request:start', { traceId, url })];
+    try {
+        const extractOverall = perf.span('extract');
+        events.push(extractOverall.startEvent);
+        const { payload, method: extractMethod } = await extractPayloadWithFallback(url, events);
+        events.push(extractOverall.end({ ok: true, method: extractMethod }));
+
+        const token = await storePayloadForTrace(traceId, payload, url, events);
+
+        try {
+            await browser.runtime.sendMessage({ type: 'HOST_PAYLOAD_READY', traceId, token });
+        } catch {
+            // ignore
         }
 
-        if (type === 'HOST_PAYLOAD_REQUEST') {
-            const traceId = (msg as any).traceId;
-            const url = (msg as any).url;
-            if (typeof traceId !== 'string' || !traceId) return;
-            if (typeof url !== 'string' || !url) return;
-
-            const events = [perf.event('host_request:start', { traceId, url })];
-            try {
-                const extractOverall = perf.span('extract');
-                events.push(extractOverall.startEvent);
-                const { payload, method: extractMethod } = await extractPayloadWithFallback(url, events);
-                events.push(extractOverall.end({ ok: true, method: extractMethod }));
-
-                const token = crypto.randomUUID();
-                const storeSpan = perf.span('session_set');
-                const pendingKey = `pending_token:${traceId}`;
-                const pendingEntry: PendingTokenEntry = { token, createdAt: Date.now() };
-                await browser.storage.session.set({ [token]: payload, [pendingKey]: pendingEntry });
-                events.push(storeSpan.startEvent, storeSpan.end());
-                await recordSessionToken(token, url);
-                void cleanupPendingTokens();
-
-                try {
-                    await browser.runtime.sendMessage({ type: 'HOST_PAYLOAD_READY', traceId, token });
-                } catch {
-                    // ignore
-                }
-
-                events.push(perf.event('host_request:end'));
-                void recordPerf({ traceId, scope: 'background', events, meta: { ok: true, source: 'host_request', extractMethod } });
-            } catch (err: any) {
-                events.push(perf.event('host_request:error', { error: err?.message || String(err) }));
-                void recordPerf({ traceId, scope: 'background', events, meta: { ok: false, source: 'host_request' } });
-                await browser.runtime.sendMessage({ type: 'HOST_PAYLOAD_ERROR', traceId, error: err?.message || String(err) }).catch(() => undefined);
-            }
-            return;
-        }
-
-        if (type === 'COMMENTS_CACHE_GET') {
-            const key = (msg as any).key;
-            if (typeof key !== 'string' || key.length > 400) return { hit: false };
-            const value = getCachedComments(key);
-            return { hit: Boolean(value), value };
-        }
-
-        if (type === 'COMMENTS_CACHE_SET') {
-            const key = (msg as any).key;
-            const value = (msg as any).value;
-            if (typeof key !== 'string' || key.length > 400) return { ok: false, reason: 'bad_key' };
-            return setCachedComments(key, value);
-        }
-    });
+        events.push(perf.event('host_request:end'));
+        void recordPerf({ traceId, scope: 'background', events, meta: { ok: true, source: 'host_request', extractMethod } });
+    } catch (err: any) {
+        events.push(perf.event('host_request:error', { error: err?.message || String(err) }));
+        void recordPerf({ traceId, scope: 'background', events, meta: { ok: false, source: 'host_request' } });
+        await browser.runtime.sendMessage({ type: 'HOST_PAYLOAD_ERROR', traceId, error: err?.message || String(err) }).catch(() => undefined);
+    }
 }
+
+installRuntimeMessageListener({
+    onPerfReport: (report) => {
+        void recordPerf(report);
+    },
+    onHostPayloadRequest: handleHostPayloadRequest,
+    onCommentsCacheGet: getCachedComments,
+    onCommentsCacheSet: setCachedComments,
+});

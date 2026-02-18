@@ -12,7 +12,8 @@
     "start:firefox:verbose": "MOZ_ENABLE_WAYLAND=0 web-ext run --source-dir dist --target firefox-desktop --verbose",
     "package": "web-ext build --source-dir dist --overwrite-dest",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "docs:check": "node scripts/check-docs.mjs"
   },
   "keywords": [],
   "author": "",

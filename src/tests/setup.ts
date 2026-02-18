@@ -7,11 +7,14 @@ const browserMock = {
         getURL: vi.fn(),
         sendMessage: vi.fn(),
         onInstalled: { addListener: vi.fn() },
+        onMessage: { addListener: vi.fn(), removeListener: vi.fn() },
     },
     tabs: {
         create: vi.fn(),
         update: vi.fn(),
         query: vi.fn(),
+        remove: vi.fn(),
+        onUpdated: { addListener: vi.fn(), removeListener: vi.fn() },
     },
     scripting: {
         executeScript: vi.fn(),

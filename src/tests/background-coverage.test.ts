@@ -259,4 +259,64 @@ describe('Background Script Coverage', () => {
             expect(readySpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'HOST_PAYLOAD_READY' }));
         });
     });
+
+    describe('Runtime message listener', () => {
+        it('should serve comments cache get/set messages', async () => {
+            let onMessageCb: Function | undefined;
+            (browser.runtime.onMessage.addListener as any).mockImplementation((fn: Function) => {
+                onMessageCb = fn;
+            });
+
+            await import('../background/index');
+            expect(onMessageCb).toBeDefined();
+
+            const setResult = await onMessageCb?.({ type: 'COMMENTS_CACHE_SET', key: '/r/a/comments/1|best|100', value: { comments: [] } });
+            expect(setResult).toEqual(expect.objectContaining({ ok: true }));
+
+            const getResult = await onMessageCb?.({ type: 'COMMENTS_CACHE_GET', key: '/r/a/comments/1|best|100' });
+            expect(getResult).toEqual(expect.objectContaining({ hit: true }));
+        });
+
+        it('should process HOST_PAYLOAD_REQUEST and notify ready', async () => {
+            let onMessageCb: Function | undefined;
+            (browser.runtime.onMessage.addListener as any).mockImplementation((fn: Function) => {
+                onMessageCb = fn;
+            });
+
+            await import('../background/index');
+            expect(onMessageCb).toBeDefined();
+
+            (globalThis.fetch as any).mockResolvedValue({
+                ok: true,
+                status: 200,
+                text: async () => JSON.stringify({
+                    data: {
+                        children: [
+                            {
+                                kind: 't3',
+                                data: {
+                                    id: 'abc123',
+                                    title: 'Host request post',
+                                    author: 'author',
+                                    subreddit_name_prefixed: 'r/test',
+                                    permalink: '/r/test/comments/abc123/post/',
+                                }
+                            }
+                        ]
+                    }
+                }),
+            });
+
+            await onMessageCb?.({
+                type: 'HOST_PAYLOAD_REQUEST',
+                traceId: 'trace-123',
+                url: 'https://www.reddit.com/r/test/comments/abc123/post/'
+            });
+
+            expect(browser.storage.session.set).toHaveBeenCalled();
+            expect(browser.runtime.sendMessage).toHaveBeenCalledWith(
+                expect.objectContaining({ type: 'HOST_PAYLOAD_READY', traceId: 'trace-123' }),
+            );
+        });
+    });
 });

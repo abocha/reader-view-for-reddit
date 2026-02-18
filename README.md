@@ -2,6 +2,18 @@
 
 Firefox extension that opens Reddit posts in a clean, distraction-free Reader View page (native Firefox Reader View doesn’t support Reddit well).
 
+## Documentation Map
+
+This repository uses in-repo documentation as the system of record.
+
+- `README.md` (this file): install, usage, packaging, and quick-start development.
+- `DESIGN.md`: architecture map, invariants, and dependency boundaries.
+- `RELIABILITY.md`: failure modes, recovery behavior, and regression checklist.
+- `SECURITY.md`: trust boundaries, sanitization rules, and security review checklist.
+- `PLANS.md`: how to write lightweight and execution plans.
+- `plans/templates/lightweight-plan.md`: template for small scoped changes.
+- `plans/templates/execution-plan.md`: template for multi-step/complex work.
+
 ## Usage
 
 - **Open Reader View**

@@ -87,27 +87,28 @@ export async function extractRedditPost(): Promise<ExtractionResult> {
             if (initialPost) {
                 // Check for Crosspost
                 const isCrosspost = initialPost.crosspost_parent_list && initialPost.crosspost_parent_list.length > 0;
-                const finalPost = isCrosspost ? initialPost.crosspost_parent_list[0] : initialPost;
+                const viewedPost = initialPost;
+                const contentPost = isCrosspost ? initialPost.crosspost_parent_list[0] : initialPost;
 
                 // Prefer selftext_html, fallback to selftext
-                const bodyMarkdown = finalPost.selftext || '';
-                let bodyHtml = finalPost.selftext_html || '';
+                const bodyMarkdown = contentPost.selftext || '';
+                let bodyHtml = contentPost.selftext_html || '';
                 if (!bodyHtml && bodyMarkdown) {
                     bodyHtml = `<pre>${escapeHtml(bodyMarkdown)}</pre>`;
                 }
                 bodyHtml = cleanRedditHtml(bodyHtml);
 
                 const subreddit = isCrosspost
-                    ? `${initialPost.subreddit_name_prefixed} 🔀 ${finalPost.subreddit_name_prefixed}`
-                    : initialPost.subreddit_name_prefixed;
+                    ? `${viewedPost.subreddit_name_prefixed} 🔀 ${contentPost.subreddit_name_prefixed}`
+                    : viewedPost.subreddit_name_prefixed;
 
                 let media: RedditPostPayload['media'] = undefined;
 
                 // Gallery (use first item for preview)
-                if (finalPost.is_gallery && finalPost.gallery_data?.items && finalPost.media_metadata) {
-                    const items = finalPost.gallery_data.items as Array<{ media_id?: string }>;
+                if (contentPost.is_gallery && contentPost.gallery_data?.items && contentPost.media_metadata) {
+                    const items = contentPost.gallery_data.items as Array<{ media_id?: string }>;
                     const firstId = items?.[0]?.media_id;
-                    const first = firstId ? finalPost.media_metadata[firstId] : null;
+                    const first = firstId ? contentPost.media_metadata[firstId] : null;
                     const firstUrl = tryHttpUrl(first?.s?.u);
                     const firstThumb = tryHttpUrl(first?.p?.[0]?.u);
                     if (firstUrl) {
@@ -121,10 +122,10 @@ export async function extractRedditPost(): Promise<ExtractionResult> {
                 }
 
                 // Video (link to Reddit-hosted fallback url)
-                if (!media && finalPost.is_video) {
+                if (!media && contentPost.is_video) {
                     const videoUrl =
-                        tryHttpUrl(finalPost.secure_media?.reddit_video?.fallback_url) ||
-                        tryHttpUrl(finalPost.media?.reddit_video?.fallback_url);
+                        tryHttpUrl(contentPost.secure_media?.reddit_video?.fallback_url) ||
+                        tryHttpUrl(contentPost.media?.reddit_video?.fallback_url);
                     if (videoUrl) {
                         media = { type: 'video', url: videoUrl };
                     }
@@ -133,12 +134,12 @@ export async function extractRedditPost(): Promise<ExtractionResult> {
                 // Image (prefer preview/source and fallback to overridden url)
                 if (!media) {
                     const previewUrl =
-                        tryHttpUrl(finalPost.preview?.images?.[0]?.source?.url) ||
-                        tryHttpUrl(finalPost.url_overridden_by_dest);
+                        tryHttpUrl(contentPost.preview?.images?.[0]?.source?.url) ||
+                        tryHttpUrl(contentPost.url_overridden_by_dest);
                     const previewThumb =
-                        tryHttpUrl(finalPost.preview?.images?.[0]?.resolutions?.[0]?.url) ||
-                        tryHttpUrl(finalPost.thumbnail);
-                    if (previewUrl && (finalPost.post_hint === 'image' || finalPost.preview?.images?.length)) {
+                        tryHttpUrl(contentPost.preview?.images?.[0]?.resolutions?.[0]?.url) ||
+                        tryHttpUrl(contentPost.thumbnail);
+                    if (previewUrl && (contentPost.post_hint === 'image' || contentPost.preview?.images?.length)) {
                         media = {
                             type: 'image',
                             url: previewUrl,
@@ -150,20 +151,20 @@ export async function extractRedditPost(): Promise<ExtractionResult> {
                 return {
                     ok: true,
                     payload: {
-                        title: initialPost.title || document.title,
-                        author: initialPost.author || 'unknown',
+                        title: viewedPost.title || document.title,
+                        author: viewedPost.author || 'unknown',
                         subreddit: subreddit || "r/reddit",
                         bodyHtml: bodyHtml,
                         bodyMarkdown: bodyMarkdown,
                         isFallback: false,
                         url: loc.href,
-                        linkUrl: finalPost.url_overridden_by_dest, // External link
-                        thumbnail: finalPost.thumbnail, // 'default', 'self', or URL
-                        permalink: finalPost.permalink,
-                        postId: finalPost.id,
-                        nsfw: Boolean(finalPost.over_18),
-                        spoiler: Boolean(finalPost.spoiler),
-                        score: typeof finalPost.score === 'number' ? finalPost.score : undefined,
+                        linkUrl: contentPost.url_overridden_by_dest, // External link
+                        thumbnail: contentPost.thumbnail, // 'default', 'self', or URL
+                        permalink: viewedPost.permalink,
+                        postId: viewedPost.id,
+                        nsfw: Boolean(viewedPost.over_18),
+                        spoiler: Boolean(viewedPost.spoiler),
+                        score: typeof viewedPost.score === 'number' ? viewedPost.score : undefined,
                         media,
                     }
                 };
@@ -195,6 +196,7 @@ export async function extractRedditPost(): Promise<ExtractionResult> {
             const metaDesc = document.querySelector('meta[name="description"]');
             if (metaDesc) bodyHtml = `<p>${(metaDesc as HTMLMetaElement).content}</p>`;
         }
+        bodyHtml = cleanRedditHtml(bodyHtml);
 
         if (!title && !bodyHtml) {
             return { ok: false, error: 'Could not extract content via JSON or DOM' };

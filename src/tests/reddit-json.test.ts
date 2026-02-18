@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { buildRedditPostJsonUrl } from '../background/reddit-json';
+import { describe, it, expect, vi } from 'vitest';
+import { buildRedditPostJsonUrl, fetchRedditPostPayloadFromJson } from '../background/reddit-json';
 
 describe('buildRedditPostJsonUrl', () => {
     it('accepts reddit.com and subdomains', () => {
@@ -17,5 +17,51 @@ describe('buildRedditPostJsonUrl', () => {
 
         expect(bad).toBeNull();
         expect(bad2).toBeNull();
+    });
+});
+
+describe('fetchRedditPostPayloadFromJson', () => {
+    it('keeps viewed thread metadata for crossposts while using parent body content', async () => {
+        (globalThis.fetch as any) = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            text: async () => JSON.stringify({
+                data: {
+                    children: [
+                        {
+                            kind: 't3',
+                            data: {
+                                id: 'cross123',
+                                title: 'Crosspost title',
+                                author: 'viewer',
+                                subreddit_name_prefixed: 'r/crosspost',
+                                permalink: '/r/crosspost/comments/cross123/viewed_post/',
+                                over_18: true,
+                                spoiler: false,
+                                score: 42,
+                                crosspost_parent_list: [
+                                    {
+                                        id: 'orig999',
+                                        selftext_html: '<p>From parent</p>',
+                                        selftext: 'From parent',
+                                        subreddit_name_prefixed: 'r/original',
+                                        permalink: '/r/original/comments/orig999/original_post/',
+                                        score: 999,
+                                    },
+                                ],
+                            },
+                        },
+                    ],
+                },
+            }),
+        });
+
+        const { payload } = await fetchRedditPostPayloadFromJson('https://www.reddit.com/r/crosspost/comments/cross123/viewed_post/');
+        expect(payload.bodyHtml).toContain('From parent');
+        expect(payload.permalink).toBe('/r/crosspost/comments/cross123/viewed_post/');
+        expect(payload.postId).toBe('cross123');
+        expect(payload.nsfw).toBe(true);
+        expect(payload.score).toBe(42);
+        expect(payload.subreddit).toBe('r/crosspost 🔀 r/original');
     });
 });

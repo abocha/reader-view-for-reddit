@@ -98,11 +98,18 @@ describe('Extraction Coverage', () => {
             title: 'Crosspost Title',
             author: 'u3',
             subreddit_name_prefixed: 'r/crosspost',
+            permalink: '/r/crosspost/comments/789/cross/',
+            over_18: true,
+            spoiler: true,
+            score: 55,
             crosspost_parent_list: [
                 {
+                    id: 'orig123',
                     title: 'Original Title',
                     selftext_html: '<div>Original Body</div>',
-                    subreddit_name_prefixed: 'r/original'
+                    subreddit_name_prefixed: 'r/original',
+                    permalink: '/r/original/comments/orig123/original/',
+                    score: 999,
                 }
             ]
         });
@@ -114,6 +121,12 @@ describe('Extraction Coverage', () => {
             expect(result.payload.subreddit).toBe('r/crosspost 🔀 r/original');
             // Should use original body
             expect(result.payload.bodyHtml).toContain('<div>Original Body</div>');
+            // Thread metadata should still point to the viewed crosspost.
+            expect(result.payload.permalink).toBe('/r/crosspost/comments/789/cross/');
+            expect(result.payload.postId).toBe('789');
+            expect(result.payload.nsfw).toBe(true);
+            expect(result.payload.spoiler).toBe(true);
+            expect(result.payload.score).toBe(55);
         }
     });
 
@@ -251,6 +264,20 @@ describe('Extraction Coverage', () => {
             expect(result.payload.title).toBe('OG Title');
             expect(result.payload.bodyHtml).toBe('<p>Meta Description</p>');
             expect(result.payload.isFallback).toBe(true);
+        }
+    });
+
+    it('should strip Reddit SC markers from DOM fallback content', async () => {
+        (globalThis.fetch as any).mockResolvedValue({ ok: false, status: 500 });
+        document.head.innerHTML = `<meta property="og:title" content="OG Title" />`;
+        document.body.innerHTML = `<div data-testid="post-content"><p><!-- SC_OFF -->hello<!-- SC_ON --></p></div>`;
+
+        const result = await extractRedditPost();
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+            expect(result.payload.bodyHtml).toContain('hello');
+            expect(result.payload.bodyHtml).not.toContain('SC_OFF');
+            expect(result.payload.bodyHtml).not.toContain('SC_ON');
         }
     });
 

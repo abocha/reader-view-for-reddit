@@ -31,7 +31,7 @@ let benchmarkSortOverride: string | null = null;
 let benchmarkAutoComments = false;
 let pendingScrollAnchor: { commentId: string; top: number } | null = null;
 let pendingCommentFocusId: string | null = null;
-let keepCommentsListDuringNextLoad = false;
+let currentCommentsHasMore = false;
 
 const COMMENTS_LIMIT_OPTIONS = [50, 100, 200, 300, 400, 500] as const;
 
@@ -111,12 +111,11 @@ function updateCommentsFooter(options: { hasMore: boolean; limit: number; loadin
         btn.onclick = () => {
             const currentLimit = getCommentsLimit();
             pendingScrollAnchor = captureCommentsScrollAnchor();
-            keepCommentsListDuringNextLoad = true;
             const limitEl = document.getElementById('comments-limit') as HTMLSelectElement | null;
             const idx = COMMENTS_LIMIT_OPTIONS.indexOf(currentLimit as any);
             const next = COMMENTS_LIMIT_OPTIONS[Math.min(COMMENTS_LIMIT_OPTIONS.length - 1, Math.max(0, idx) + 1)] ?? 500;
             if (limitEl) limitEl.value = String(next);
-            void loadComments();
+            void loadComments({ reason: 'load_more', preserveExisting: true });
         };
     }
 }
@@ -834,12 +833,18 @@ export function initCommentsUI() {
     toggleSwitch?.addEventListener('change', () => {
         commentsVisible = toggleSwitch.checked;
         setCommentsVisibility(commentsVisible);
-        if (commentsVisible && currentComments.length === 0) void loadComments();
+        if (!commentsVisible) {
+            commentsAbort?.abort();
+            commentsAbort = null;
+            commentsLoadSeq += 1;
+            return;
+        }
+        if (currentComments.length === 0) void loadComments({ reason: 'init' });
     });
 
     const onFetchConfigChange = () => {
         if (!commentsVisible) return;
-        void loadComments();
+        void loadComments({ reason: 'filter', preserveExisting: true });
     };
 
     const onViewConfigChange = () => {
@@ -857,7 +862,7 @@ export function initCommentsUI() {
     if (toggleSwitch) {
         commentsVisible = toggleSwitch.checked;
         setCommentsVisibility(commentsVisible);
-        if (commentsVisible) void loadComments();
+        if (commentsVisible) void loadComments({ reason: 'init' });
     }
 }
 
@@ -942,6 +947,11 @@ export function renderArticle(post: RedditPostPayload) {
     if (!articleEl) return;
 
     currentPost = post;
+    currentComments = [];
+    currentCommentsHasMore = false;
+    commentsAbort?.abort();
+    commentsAbort = null;
+    commentsLoadSeq += 1;
     document.body.classList.toggle('post-nsfw', Boolean(post.nsfw));
     document.body.classList.toggle('post-spoiler', Boolean(post.spoiler));
 
@@ -1218,7 +1228,14 @@ function parseHttpUrl(value: string): URL | null {
     }
 }
 
-async function loadComments() {
+type CommentsLoadReason = 'init' | 'filter' | 'retry' | 'load_more';
+
+type LoadCommentsOptions = {
+    preserveExisting?: boolean;
+    reason?: CommentsLoadReason;
+};
+
+async function loadComments(options: LoadCommentsOptions = {}) {
     const localTrace = traceId ?? crypto.randomUUID();
     const events: ReturnType<typeof perf.event>[] = [perf.event('comments:load_start')];
     const commentsSection = document.getElementById('comments') as HTMLElement | null;
@@ -1228,13 +1245,21 @@ async function loadComments() {
     const sortEl = document.getElementById('comments-sort') as HTMLSelectElement | null;
 
     if (!commentsSection || !statusEl || !listEl) return;
+    if (!commentsVisible) return;
+
+    const reason = options.reason ?? 'init';
+    const preserveExisting = typeof options.preserveExisting === 'boolean'
+        ? options.preserveExisting
+        : reason === 'retry' || reason === 'load_more';
+
     if (!currentPost?.permalink) {
         commentsSection.hidden = false;
         setCommentsStatus(statusEl, 'info', currentPost?.isFallback
             ? 'Comments are unavailable (fallback extraction was used).'
             : 'Comments are unavailable for this post.');
         listEl.replaceChildren();
-        updateCommentsFooter({ hasMore: false, limit: getCommentsLimit(), loading: false, permalink: currentPost?.permalink });
+        currentCommentsHasMore = false;
+        updateCommentsFooter({ hasMore: currentCommentsHasMore, limit: getCommentsLimit(), loading: false, permalink: currentPost?.permalink });
         currentComments = [];
         return;
     }
@@ -1244,16 +1269,23 @@ async function loadComments() {
 
     const requestSeq = ++commentsLoadSeq;
     commentsAbort?.abort();
-    commentsAbort = new AbortController();
+    const abortController = new AbortController();
+    commentsAbort = abortController;
 
+    if (!commentsVisible) return;
     commentsSection.hidden = false;
     setCommentsStatus(statusEl, 'loading', 'Loading comments…');
     if (limitEl) limitEl.disabled = true;
     if (sortEl) sortEl.disabled = true;
-    if (!keepCommentsListDuringNextLoad) {
+    if (!preserveExisting) {
         listEl.replaceChildren();
     }
-    updateCommentsFooter({ hasMore: false, limit, loading: keepCommentsListDuringNextLoad, permalink: currentPost?.permalink });
+    updateCommentsFooter({
+        hasMore: preserveExisting ? currentCommentsHasMore : false,
+        limit,
+        loading: preserveExisting,
+        permalink: currentPost?.permalink
+    });
 
     let aborted = false;
 
@@ -1273,8 +1305,9 @@ async function loadComments() {
                 const hasMore = Boolean((value as any).hasMore);
                 const totalCount = typeof (value as any).totalCount === 'number' ? (value as any).totalCount : undefined;
 
-                if (Array.isArray(cachedComments) && requestSeq === commentsLoadSeq) {
+                if (Array.isArray(cachedComments) && requestSeq === commentsLoadSeq && commentsVisible) {
                     currentComments = cachedComments;
+                    currentCommentsHasMore = hasMore;
                     expandedMoreById.clear();
                     expandedLowScoreById.clear();
                     collapsedById.clear();
@@ -1302,7 +1335,7 @@ async function loadComments() {
 
         const url = buildCommentsJsonUrl(currentPost.permalink, { limit, sort });
         const fetchSpan = perf.span('comments:fetch', { url: url.toString(), limit, sort });
-        const response = await fetch(url.toString(), { credentials: 'include', signal: commentsAbort.signal });
+        const response = await fetch(url.toString(), { credentials: 'include', signal: abortController.signal });
         events.push(fetchSpan.startEvent, fetchSpan.end({ ok: response.ok, status: response.status }));
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
@@ -1315,8 +1348,9 @@ async function loadComments() {
 
         const parsed = parseCommentsListing(commentsListing);
         events.push(parseSpan.startEvent, parseSpan.end({ loadedCount: parsed.loadedCount, hasMore: parsed.hasMore, totalCount }));
-        if (requestSeq !== commentsLoadSeq) return;
+        if (requestSeq !== commentsLoadSeq || !commentsVisible) return;
         currentComments = parsed.comments;
+        currentCommentsHasMore = parsed.hasMore;
         expandedMoreById.clear();
         expandedLowScoreById.clear();
         collapsedById.clear();
@@ -1354,22 +1388,22 @@ async function loadComments() {
             return;
         }
         console.error('[Reader Host] Failed to load comments', err);
-        if (requestSeq !== commentsLoadSeq) return;
+        if (requestSeq !== commentsLoadSeq || !commentsVisible) return;
         setCommentsStatus(statusEl, 'error', 'Failed to load comments.', {
             actions: [
                 {
                     label: 'Retry',
-                    onClick: () => void loadComments(),
+                    onClick: () => void loadComments({ reason: 'retry', preserveExisting: true }),
                 }
             ],
         });
-        if (!keepCommentsListDuringNextLoad) {
+        if (!preserveExisting) {
             listEl.replaceChildren();
             currentComments = [];
+            currentCommentsHasMore = false;
         }
-        updateCommentsFooter({ hasMore: keepCommentsListDuringNextLoad, limit, loading: false, permalink: currentPost?.permalink });
+        updateCommentsFooter({ hasMore: currentCommentsHasMore, limit, loading: false, permalink: currentPost?.permalink });
     } finally {
-        keepCommentsListDuringNextLoad = false;
         if (requestSeq === commentsLoadSeq) {
             if (limitEl) limitEl.disabled = false;
             if (sortEl) sortEl.disabled = false;
