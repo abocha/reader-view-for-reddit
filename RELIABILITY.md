@@ -31,6 +31,7 @@
 - Retry after comments fetch `500`.
 - Pending token timeout and cleanup behavior.
 - Cache hit/miss + eviction paths.
+- Markdown export tree consistency: `comment_id`/`parent_id`/`path`/`depth` align with visible comment order and depth filtering.
 
 ## Known Limits
 - Reddit comments endpoint effectively caps practical loading around ~500 comments.

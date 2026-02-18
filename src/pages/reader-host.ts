@@ -1932,14 +1932,42 @@ function selectVisibleChildren(
     return { visible, lowScoreCollapsed, hiddenDepthCount };
 }
 
+type CommentExportTreeContext = {
+    parentId: string | null;
+    path: string;
+    isLast: boolean;
+    ancestorIsLast: boolean[];
+};
+
+function buildCommentTreePrefix(ancestorIsLast: boolean[], isLast: boolean): string {
+    const ancestorPrefix = ancestorIsLast.map(last => (last ? '    ' : '|   ')).join('');
+    return `${ancestorPrefix}${isLast ? '`-- ' : '|-- '}`;
+}
+
+function buildCommentTreeBodyPrefix(ancestorIsLast: boolean[], isLast: boolean): string {
+    const ancestorPrefix = ancestorIsLast.map(last => (last ? '    ' : '|   ')).join('');
+    return `${ancestorPrefix}${isLast ? '    ' : '|   '}`;
+}
+
 export function buildPostMarkdown(post: RedditPostPayload): string {
+    const bodyMarkdown = post.bodyMarkdown?.trim() || '';
     const parts: string[] = [];
     parts.push(`# ${post.title}`);
     parts.push('');
-    parts.push(post.url);
+    parts.push('## Post Metadata');
+    parts.push(`- source_url: ${post.url}`);
+    parts.push(`- permalink: ${post.permalink || '(none)'}`);
+    parts.push(`- subreddit: ${post.subreddit || 'r/reddit'}`);
+    parts.push(`- author: u/${post.author || 'unknown'}`);
+    parts.push(`- score: ${typeof post.score === 'number' ? String(post.score) : '(unknown)'}`);
+    parts.push(`- nsfw: ${post.nsfw ? 'true' : 'false'}`);
+    parts.push(`- spoiler: ${post.spoiler ? 'true' : 'false'}`);
+    parts.push(`- fallback_extraction: ${post.isFallback ? 'true' : 'false'}`);
     parts.push('');
-    if (post.bodyMarkdown) {
-        parts.push(post.bodyMarkdown.trim());
+    parts.push('## Post Body (Markdown)');
+    parts.push('');
+    if (bodyMarkdown) {
+        parts.push(bodyMarkdown);
     } else if (post.bodyHtml) {
         parts.push('(No Markdown content available)');
     } else {
@@ -1956,13 +1984,17 @@ function buildPostAndCommentsMarkdown(
     const parts: string[] = [];
     parts.push(buildPostMarkdown(post));
     parts.push('');
-    parts.push('---');
-    parts.push('');
     const depth = getCommentsDepth();
     const autoDepth = getAutoDepth();
     const hideLow = getHideLowScore();
 
-    parts.push(`## Comments (depth ${depth}, limit ${limit})`);
+    parts.push('## Comment Export Settings');
+    parts.push(`- copy_limit: ${limit}`);
+    parts.push(`- depth_setting: ${depth}`);
+    parts.push(`- auto_depth: ${autoDepth ? 'true' : 'false'}`);
+    parts.push(`- hide_low_score: ${hideLow ? 'true' : 'false'}`);
+    parts.push('');
+    parts.push('## Comments');
     parts.push('');
 
     if (comments.length === 0) {
@@ -1970,10 +2002,27 @@ function buildPostAndCommentsMarkdown(
         return parts.join('\n');
     }
 
-    for (const comment of comments) {
+    parts.push(`- root_comments: ${comments.length}`);
+    parts.push('');
+
+    const visibleRoots = comments.filter(comment => !collapsedById.has(comment.id));
+    for (let i = 0; i < visibleRoots.length; i += 1) {
+        const comment = visibleRoots[i]!;
         const topScore = typeof comment.score === 'number' ? comment.score : 0;
         const promoted = autoDepth ? computePromotedPathIds(comment, depth, topScore) : new Set<string>();
-        appendVisibleCommentMarkdown(parts, comment, 0, { depthLimit: depth, autoDepth, hideLow, promotedPathIds: promoted }, false);
+        appendVisibleCommentMarkdown(
+            parts,
+            comment,
+            0,
+            { depthLimit: depth, autoDepth, hideLow, promotedPathIds: promoted },
+            false,
+            {
+                parentId: null,
+                path: String(i + 1),
+                isLast: i === visibleRoots.length - 1,
+                ancestorIsLast: [],
+            },
+        );
     }
 
     return parts.join('\n');
@@ -1985,18 +2034,37 @@ function appendVisibleCommentMarkdown(
     depth: number,
     settings: { depthLimit: number; autoDepth: boolean; hideLow: boolean; promotedPathIds: Set<string> },
     unlimitedDepth: boolean,
+    treeContext: CommentExportTreeContext,
 ) {
     if (collapsedById.has(comment.id)) return;
 
-    const indent = '  '.repeat(depth);
-    const header = `${indent}- **u/${comment.author}**`;
-    out.push(header);
+    const commentId = comment.id || '(unknown)';
+    const author = comment.author || 'unknown';
+    const scorePart = typeof comment.score === 'number' ? ` score=${comment.score}` : '';
+    const createdPart = typeof comment.createdUtc === 'number' ? ` created_utc=${comment.createdUtc}` : '';
+    const parentId = treeContext.parentId ?? 'null';
+
+    const header = [
+        `comment_id=${commentId}`,
+        `parent_id=${parentId}`,
+        `path=${treeContext.path}`,
+        `depth=${depth}`,
+        `author=u/${author}`,
+    ];
+
+    const treePrefix = buildCommentTreePrefix(treeContext.ancestorIsLast, treeContext.isLast);
+    const bodyPrefix = buildCommentTreeBodyPrefix(treeContext.ancestorIsLast, treeContext.isLast);
+
+    out.push(`${treePrefix}[comment ${header.join(' ')}${scorePart}${createdPart}]`);
 
     const body = comment.bodyMarkdown?.trim() || '';
-    if (body) {
+    out.push(`${bodyPrefix}text: |`);
+    if (!body) {
+        out.push(`${bodyPrefix}  (empty)`);
+    } else {
         const lines = body.split('\n');
         for (const line of lines) {
-            out.push(`${indent}  ${line}`);
+            out.push(`${bodyPrefix}  ${line}`);
         }
     }
 
@@ -2013,8 +2081,14 @@ function appendVisibleCommentMarkdown(
         thisSubtreeUnlimited,
     );
 
-    for (const reply of visible) {
-        appendVisibleCommentMarkdown(out, reply, depth + 1, settings, thisSubtreeUnlimited);
+    for (let i = 0; i < visible.length; i += 1) {
+        const reply = visible[i]!;
+        appendVisibleCommentMarkdown(out, reply, depth + 1, settings, thisSubtreeUnlimited, {
+            parentId: commentId,
+            path: `${treeContext.path}.${i + 1}`,
+            isLast: i === visible.length - 1,
+            ancestorIsLast: [...treeContext.ancestorIsLast, treeContext.isLast],
+        });
     }
 }
 
@@ -2271,6 +2345,7 @@ function showToast(message: string, tone: 'info' | 'success' | 'error' = 'info')
 
 export const __test__ = {
     buildCommentSnippet,
+    buildPostAndCommentsMarkdown,
     init,
     initTokenProtocol,
     isProbablyImageUrl,

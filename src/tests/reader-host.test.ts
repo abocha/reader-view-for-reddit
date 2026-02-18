@@ -268,6 +268,70 @@ describe('Reader Host Logic', () => {
             const md = buildPostMarkdown(post);
             expect(md).toContain('(No Markdown content available)');
         });
+
+        it('should export comments with ascii tree markers and explicit structural fields', () => {
+            document.body.innerHTML = `
+                <input id="comments-depth" value="5" />
+                <input id="comments-auto-depth" type="checkbox" />
+                <input id="comments-hide-low" type="checkbox" />
+            `;
+            __test__.collapsedById.clear();
+
+            const post = {
+                title: 'Tree Export',
+                url: 'https://example.com/post',
+                bodyMarkdown: 'Body',
+                author: 'op',
+                subreddit: 'test',
+                bodyHtml: '',
+                isFallback: false,
+            };
+
+            const comments = [
+                {
+                    id: 'c1',
+                    author: 'a',
+                    bodyMarkdown: 'parent',
+                    bodyHtml: '<p>parent</p>',
+                    score: 10,
+                    replies: [
+                        {
+                            id: 'c2',
+                            author: 'b',
+                            bodyMarkdown: 'child one',
+                            bodyHtml: '<p>child one</p>',
+                            score: 7,
+                            replies: [],
+                        },
+                        {
+                            id: 'c3',
+                            author: 'c',
+                            bodyMarkdown: 'child two',
+                            bodyHtml: '<p>child two</p>',
+                            score: 4,
+                            replies: [],
+                        },
+                    ],
+                },
+                {
+                    id: 'c4',
+                    author: 'd',
+                    bodyMarkdown: 'second root',
+                    bodyHtml: '<p>second root</p>',
+                    score: 3,
+                    replies: [],
+                },
+            ];
+
+            const md = __test__.buildPostAndCommentsMarkdown(post as any, comments as any, 100);
+            expect(md).toContain('## Comments');
+            expect(md).toContain('- root_comments: 2');
+            expect(md).toContain('|-- [comment comment_id=c1 parent_id=null path=1 depth=0 author=u/a score=10]');
+            expect(md).toContain('|   |-- [comment comment_id=c2 parent_id=c1 path=1.1 depth=1 author=u/b score=7]');
+            expect(md).toContain('|   `-- [comment comment_id=c3 parent_id=c1 path=1.2 depth=1 author=u/c score=4]');
+            expect(md).toContain('`-- [comment comment_id=c4 parent_id=null path=2 depth=0 author=u/d score=3]');
+            expect(md).toContain('|   text: |');
+        });
     });
 
 	    describe('computePromotedPathIds (Auto-Expand)', () => {

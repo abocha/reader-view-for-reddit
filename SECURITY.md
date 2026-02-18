@@ -20,6 +20,10 @@
 - Pending token/session entries are TTL-scoped and periodically cleaned.
 - Performance/reporting storage is bounded.
 
+## Markdown export safety
+- Copy/export output is plain markdown text only; it does not introduce a new execution boundary.
+- Comment tree connectors are presentation-only; downstream parsing should rely on explicit structural fields.
+
 ## Required Review Checklist for Changes
 - Are all new URLs parsed and protocol-validated?
 - Is any new HTML rendered through existing sanitization?

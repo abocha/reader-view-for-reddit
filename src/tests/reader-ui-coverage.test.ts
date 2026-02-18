@@ -173,10 +173,13 @@ import browser from 'webextension-polyfill';
             const btn = document.getElementById('copy-post-md');
             btn?.click();
 
-            // Wait for async handler
-            await new Promise(r => setTimeout(r, 0));
+	            // Wait for async handler
+	            await new Promise(r => setTimeout(r, 0));
 
-            expect(writeText).toHaveBeenCalledWith(expect.stringContaining('# Post'));
+	            const copied = writeText.mock.calls[0]?.[0] as string;
+	            expect(copied).toContain('# Post');
+	            expect(copied).toContain('## Post Metadata');
+	            expect(copied).toContain('## Post Body (Markdown)');
 
             // Check toast
             const toast = document.getElementById('__rvrr_toast');
@@ -213,8 +216,10 @@ import browser from 'webextension-polyfill';
 	            await new Promise(r => setTimeout(r, 0));
 
 	            const text = writeText.mock.calls[0]?.[0] as string;
+	            expect(text).toContain('## Comment Export Settings');
+	            expect(text).toContain('## Comments');
 	            expect(text).toContain('(No comments loaded)');
-	            expect(text).toContain('limit 10');
+	            expect(text).toContain('copy_limit: 10');
 	        });
 
         it('should fallback to execCommand when clipboard write fails (and include nested replies)', async () => {
@@ -286,7 +291,17 @@ import browser from 'webextension-polyfill';
                                             }
                                         }
                                     }
-                                }
+                                },
+                                {
+                                    kind: 't1',
+                                    data: {
+                                        id: 'c3',
+                                        author: 'c',
+                                        body: 'sibling',
+                                        score: 2,
+                                        replies: ''
+                                    }
+                                },
                             ]
                         }
                     }
@@ -313,8 +328,10 @@ import browser from 'webextension-polyfill';
             await new Promise(r => setTimeout(r, 0));
 
             expect((document as any).execCommand).toHaveBeenCalledWith('copy');
-            expect(copiedText).toContain('- **u/a**');
-            expect(copiedText).toContain('  - **u/b**');
+            expect(copiedText).toContain('|-- [comment comment_id=c1 parent_id=null path=1 depth=0 author=u/a score=10]');
+            expect(copiedText).toContain('|   `-- [comment comment_id=c2 parent_id=c1 path=1.1 depth=1 author=u/b score=5]');
+            expect(copiedText).toContain('`-- [comment comment_id=c3 parent_id=null path=2 depth=0 author=u/c score=2]');
+            expect(copiedText).toContain('text: |');
             expect(copiedText).toContain('child');
             expect(document.querySelector('textarea')).toBeNull();
 
