@@ -34,5 +34,5 @@ Template: `plans/templates/execution-plan.md`
 ## Process
 1. Create a plan file from a template.
 2. Keep decision logs updated as scope evolves.
-3. Link plan in PR description.
-4. Move plan from `plans/active/` to `plans/completed/` after merge.
+3. Link plan in commit message body, release notes, or issue log (repo ships directly from `main`).
+4. Move plan from `plans/active/` to `plans/completed/` after implementation and validation.

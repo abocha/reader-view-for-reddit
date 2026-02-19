@@ -42,5 +42,5 @@
 - Chunked rendering: superseded render jobs do not overwrite newer UI state.
 
 ## Known Limits
-- Reddit comments endpoint effectively caps practical loading around ~500 comments.
+- Initial Reddit listing endpoint effectively caps practical first-pass loading around ~500 comments.
 - `morechildren` traversal is intentionally bounded (request/node/time caps) to preserve UI responsiveness.

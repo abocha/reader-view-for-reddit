@@ -20,6 +20,8 @@ Reader View for Reddit is a Firefox MV3 extension that extracts Reddit post cont
 3. Payload is stored in `storage.session` with token + pending trace marker.
 4. Reader host loads by token and renders article; comments load on demand.
 5. Optional deep comment loading resolves Reddit `morechildren` placeholders with bounded local budgets.
+6. Comments rendering supports local search and bulk tree controls without requiring additional fetches.
+7. Markdown export supports copy and download flows with the same structural contract.
 
 ## Invariants
 - Extractor injected into page must remain self-contained (no runtime imports).

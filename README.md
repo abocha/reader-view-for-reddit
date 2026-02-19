@@ -23,24 +23,39 @@ This repository uses in-repo documentation as the system of record.
 - **Settings (in Reader View)**
   - Theme, font, and alignment toggles.
   - Open mode: same tab vs new tab.
-- **Copy**
+- **Markdown Export**
   - Copy post as Markdown, or post + comments as Markdown.
+  - Download post Markdown, or post + comments Markdown.
+  - Comments export uses explicit structural fields (`id`, `p`, `x`, `d`) and ASCII tree connectors for human + agent readability.
 - **Comments**
   - Default limit is `100` (configurable up to `500`).
-  - “Load more comments” increases the limit in steps (keeps scroll position).
-  - When Reddit indicates there are more than we can load, the footer offers a link to “See more comments on Reddit”.
+  - Single toggle `Smart thread curation`:
+    - `ON`: expands useful deep branches and collapses hard-low-value noise.
+    - `OFF`: depth-only behavior.
+  - Local search supports free text and `author:<name>`.
+  - Bulk controls: `Expand all`, `Collapse all`, `Reset view`.
+  - Deep loading supports branch/root expansion via Reddit `morechildren` with bounded safety budgets (requests/nodes/time).
+  - The footer falls back to limit-step loading and “See more comments on Reddit” when placeholders are unavailable but Reddit still signals more comments.
 
 ## Notes / Limitations
 
 - Works on Reddit post URLs (`/comments/...`).
-- Comments are fetched from Reddit’s JSON listing endpoint, which tops out around ~500 and uses `"more"` placeholders; loading full 1000+ threads would require implementing `morechildren`.
+- Initial Reddit listing fetch is still practically limited (~500) and may include `"more"` placeholders.
+- Deep loading is implemented with `morechildren`, but intentionally bounded to keep casual browsing smooth and responsive.
+- Extremely large/locked/removed threads can still require opening the canonical Reddit page for full context.
 
 ## Development
 
 - Build: `pnpm build`
+- Dev watch: `pnpm dev`
 - Lint: `pnpm lint`
 - Typecheck: `pnpm typecheck`
+- Test: `pnpm test`
 - Run in Firefox: `pnpm start:firefox`
+- Compatibility launch helpers:
+  - `pnpm start:firefox:verbose`
+  - `pnpm start:firefox:compat`
+  - `pnpm start:firefox:compat:verbose`
 
 ## Package & Install
 
@@ -55,10 +70,12 @@ This repository uses in-repo documentation as the system of record.
 - Preflight checks only:
   - `pnpm release:preflight`
   - Includes: `lint`, `typecheck`, `test`, `build`
-- Create and publish a semver release tag (CI will build/package/release on GitHub):
+- Create and publish a semver release tag (script commits, tags, and pushes from clean `main`):
   - `pnpm release:patch`
   - `pnpm release:minor`
   - `pnpm release:major`
+- Generate release notes locally:
+  - `node scripts/release-notes.mjs --tag vX.Y.Z --output /tmp/release-notes.md`
 - Backfill or replace a missing release asset on an existing tag:
   - `pnpm release:fix-assets -- --tag v2.3.1 --version 2.3.1`
 - Manually rerun release packaging for an existing tag from GitHub Actions:
