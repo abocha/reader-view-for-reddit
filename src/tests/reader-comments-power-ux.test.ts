@@ -90,32 +90,39 @@ describe('markdown download actions', () => {
             <article id="spike-article"></article>
         `;
 
+        const urlAny = URL as any;
+        const originalCreateObjectURL = urlAny.createObjectURL;
+        const originalRevokeObjectURL = urlAny.revokeObjectURL;
+
         const createObjectURL = vi.fn(() => 'blob:test');
         const revokeObjectURL = vi.fn();
-        (URL as any).createObjectURL = createObjectURL;
-        (URL as any).revokeObjectURL = revokeObjectURL;
+        urlAny.createObjectURL = createObjectURL;
+        urlAny.revokeObjectURL = revokeObjectURL;
 
         const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+        try {
+            initActions();
+            renderArticle({
+                title: 'Power UX Post',
+                author: 'me',
+                subreddit: 'r/test',
+                bodyHtml: '<p>Body</p>',
+                bodyMarkdown: 'Body',
+                url: 'https://www.reddit.com/r/test/comments/abc123/power-ux-post/',
+                postId: 'abc123',
+                isFallback: false,
+            } as any);
 
-        initActions();
-        renderArticle({
-            title: 'Power UX Post',
-            author: 'me',
-            subreddit: 'r/test',
-            bodyHtml: '<p>Body</p>',
-            bodyMarkdown: 'Body',
-            url: 'https://www.reddit.com/r/test/comments/abc123/power-ux-post/',
-            postId: 'abc123',
-            isFallback: false,
-        } as any);
+            (document.getElementById('download-post-md') as HTMLButtonElement).click();
+            await Promise.resolve();
 
-        (document.getElementById('download-post-md') as HTMLButtonElement).click();
-        await Promise.resolve();
-
-        expect(createObjectURL).toHaveBeenCalled();
-        expect(clickSpy).toHaveBeenCalled();
-        expect(revokeObjectURL).toBeTypeOf('function');
-
-        clickSpy.mockRestore();
+            expect(createObjectURL).toHaveBeenCalled();
+            expect(clickSpy).toHaveBeenCalled();
+            expect(revokeObjectURL).toBeTypeOf('function');
+        } finally {
+            clickSpy.mockRestore();
+            urlAny.createObjectURL = originalCreateObjectURL;
+            urlAny.revokeObjectURL = originalRevokeObjectURL;
+        }
     });
 });

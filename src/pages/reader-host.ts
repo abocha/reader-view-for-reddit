@@ -59,6 +59,7 @@ type VisibilityViewState = {
 type RenderTreeSettings = {
     depthLimit: number;
     visibilityPlan: VisibilityPlan;
+    searchActive?: boolean;
 };
 
 type CommentsBulkAction = 'expand_all' | 'collapse_all' | 'reset_view';
@@ -2000,6 +2001,7 @@ function rerenderComments() {
     listEl.replaceChildren();
 
     const searchQuery = getCommentsSearchQuery();
+    const searchActive = searchQuery.length > 0;
     const filteredRoots = filterCommentsBySearch(currentComments, searchQuery);
     if (searchQuery && filteredRoots.length === 0) {
         const empty = document.createElement('div');
@@ -2013,8 +2015,8 @@ function rerenderComments() {
     const depth = getCommentsDepth();
     const smartMode = getSmartCommentsMode();
     const policy: VisibilityPolicy = {
-        depthLimit: depth,
-        smartMode,
+        depthLimit: searchActive ? Number.MAX_SAFE_INTEGER : depth,
+        smartMode: searchActive ? false : smartMode,
         ...DEFAULT_VISIBILITY_POLICY,
     };
     const viewState: VisibilityViewState = {
@@ -2024,7 +2026,7 @@ function rerenderComments() {
 
     for (const top of filteredRoots) {
         const visibilityPlan = buildVisibilityPlan(top, policy, viewState);
-        listEl.appendChild(renderCommentTree(top, { depthLimit: depth, visibilityPlan }, 0, false));
+        listEl.appendChild(renderCommentTree(top, { depthLimit: depth, visibilityPlan, searchActive }, 0, false));
     }
 
     restoreCommentFocus();
@@ -2068,9 +2070,10 @@ export function renderCommentTree(
     const toggle = document.createElement('button');
     toggle.className = 'comment-toggle btn btn--ghost btn--sm';
     toggle.type = 'button';
+    const searchActive = Boolean(settings.searchActive);
     const isAutoModerator = comment.author.trim().toLowerCase() === 'automoderator';
-    const autoCollapsed = isAutoModerator && !autoModeratorExpandedById.has(comment.id);
-    const isCollapsed = Boolean(options?.forceCollapsed) || collapsedById.has(comment.id) || autoCollapsed;
+    const autoCollapsed = !searchActive && isAutoModerator && !autoModeratorExpandedById.has(comment.id);
+    const isCollapsed = !searchActive && (Boolean(options?.forceCollapsed) || collapsedById.has(comment.id) || autoCollapsed);
     toggle.textContent = isCollapsed ? '▸' : '▾';
     toggle.title = isCollapsed ? 'Expand' : 'Collapse';
     toggle.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');

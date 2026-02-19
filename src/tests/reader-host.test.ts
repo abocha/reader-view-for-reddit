@@ -651,5 +651,45 @@ describe('Reader Host Logic', () => {
 
             expect(__test__.collapsedById.has('c2')).toBe(true);
         });
+
+        it('should keep matched branch expanded while search is active', () => {
+            __test__.collapsedById.clear();
+            __test__.collapsedById.add('c-search');
+
+            const wrapper = renderCommentTree(
+                {
+                    id: 'c-search',
+                    author: 'user',
+                    bodyMarkdown: 'contains needle',
+                    bodyHtml: '<p>contains needle</p>',
+                    replies: [],
+                } as any,
+                {
+                    depthLimit: 5,
+                    searchActive: true,
+                    visibilityPlan: buildVisibilityPlan({
+                        id: 'c-search',
+                        author: 'user',
+                        bodyMarkdown: 'contains needle',
+                        bodyHtml: '<p>contains needle</p>',
+                        replies: [],
+                    } as any, {
+                        depthLimit: 5,
+                        smartMode: false,
+                        utilityThreshold: 0.75,
+                        siblingCloseDelta: 0.6,
+                        maxExtraDeepVisiblePerRoot: 12,
+                    }, {
+                        expandedMoreIds: new Set<string>(),
+                        expandedLowScoreIds: new Set<string>(),
+                    }),
+                },
+                0,
+                false,
+            );
+
+            expect(wrapper.querySelector('.comment-collapsed')).toBeNull();
+            expect(wrapper.querySelector('.comment-body')?.textContent).toContain('contains needle');
+        });
     });
 });
