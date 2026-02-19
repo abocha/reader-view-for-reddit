@@ -220,6 +220,8 @@ import browser from 'webextension-polyfill';
 	            expect(text).toContain('## Comments');
 	            expect(text).toContain('(No comments loaded)');
 	            expect(text).toContain('copy_limit: 10');
+	            expect(text).toMatch(/- exported_at_utc: \d{10}/);
+	            expect(text).toContain('field_legend: node(id,p,x,d,a,s,t)');
 	        });
 
         it('should fallback to execCommand when clipboard write fails (and include nested replies)', async () => {
@@ -328,9 +330,9 @@ import browser from 'webextension-polyfill';
             await new Promise(r => setTimeout(r, 0));
 
             expect((document as any).execCommand).toHaveBeenCalledWith('copy');
-            expect(copiedText).toContain('|-- [comment comment_id=c1 parent_id=null path=1 depth=0 author=u/a score=10]');
-            expect(copiedText).toContain('|   `-- [comment comment_id=c2 parent_id=c1 path=1.1 depth=1 author=u/b score=5]');
-            expect(copiedText).toContain('`-- [comment comment_id=c3 parent_id=null path=2 depth=0 author=u/c score=2]');
+            expect(copiedText).toContain('|-- [node id=c1 p=null x=1 d=0 a=a s=10]');
+            expect(copiedText).toContain('|   `-- [node id=c2 p=c1 x=1.1 d=1 a=b s=5]');
+            expect(copiedText).toContain('`-- [node id=c3 p=null x=2 d=0 a=c s=2]');
             expect(copiedText).toContain('text: |');
             expect(copiedText).toContain('child');
             expect(document.querySelector('textarea')).toBeNull();

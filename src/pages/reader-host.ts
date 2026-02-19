@@ -1987,9 +1987,12 @@ function buildPostAndCommentsMarkdown(
     const depth = getCommentsDepth();
     const autoDepth = getAutoDepth();
     const hideLow = getHideLowScore();
+    const exportedAtUtc = Math.floor(Date.now() / 1000);
 
     parts.push('## Comment Export Settings');
     parts.push(`- copy_limit: ${limit}`);
+    parts.push(`- exported_at_utc: ${exportedAtUtc}`);
+    parts.push('- field_legend: node(id,p,x,d,a,s,t)');
     parts.push(`- depth_setting: ${depth}`);
     parts.push(`- auto_depth: ${autoDepth ? 'true' : 'false'}`);
     parts.push(`- hide_low_score: ${hideLow ? 'true' : 'false'}`);
@@ -2023,6 +2026,7 @@ function buildPostAndCommentsMarkdown(
                 ancestorIsLast: [],
             },
         );
+        if (i < visibleRoots.length - 1) parts.push('');
     }
 
     return parts.join('\n');
@@ -2040,22 +2044,22 @@ function appendVisibleCommentMarkdown(
 
     const commentId = comment.id || '(unknown)';
     const author = comment.author || 'unknown';
-    const scorePart = typeof comment.score === 'number' ? ` score=${comment.score}` : '';
-    const createdPart = typeof comment.createdUtc === 'number' ? ` created_utc=${comment.createdUtc}` : '';
+    const scorePart = typeof comment.score === 'number' ? ` s=${comment.score}` : '';
+    const createdPart = typeof comment.createdUtc === 'number' ? ` t=${comment.createdUtc}` : '';
     const parentId = treeContext.parentId ?? 'null';
 
     const header = [
-        `comment_id=${commentId}`,
-        `parent_id=${parentId}`,
-        `path=${treeContext.path}`,
-        `depth=${depth}`,
-        `author=u/${author}`,
+        `id=${commentId}`,
+        `p=${parentId}`,
+        `x=${treeContext.path}`,
+        `d=${depth}`,
+        `a=${author}`,
     ];
 
     const treePrefix = buildCommentTreePrefix(treeContext.ancestorIsLast, treeContext.isLast);
     const bodyPrefix = buildCommentTreeBodyPrefix(treeContext.ancestorIsLast, treeContext.isLast);
 
-    out.push(`${treePrefix}[comment ${header.join(' ')}${scorePart}${createdPart}]`);
+    out.push(`${treePrefix}[node ${header.join(' ')}${scorePart}${createdPart}]`);
 
     const body = comment.bodyMarkdown?.trim() || '';
     out.push(`${bodyPrefix}text: |`);

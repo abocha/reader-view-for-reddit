@@ -24,7 +24,7 @@ Reader View for Reddit is a Firefox MV3 extension that extracts Reddit post cont
 - Extractor injected into page must remain self-contained (no runtime imports).
 - Crosspost metadata (`permalink`, `postId`, flags) follows the viewed thread.
 - Reader UI sanitizes post/comment HTML before rendering.
-- Markdown comment export structural truth is explicit fields (`comment_id`, `parent_id`, `path`, `depth`); ASCII tree prefixes are visual only.
+- Markdown comment export structural truth is explicit node fields (`id`, `p`, `x`, `d`) in `[node ...]`; ASCII tree prefixes are visual only.
 - `README.md` is the top-level navigation point for docs.
 
 ## Dependency Boundaries

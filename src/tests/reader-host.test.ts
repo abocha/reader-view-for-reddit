@@ -326,10 +326,13 @@ describe('Reader Host Logic', () => {
             const md = __test__.buildPostAndCommentsMarkdown(post as any, comments as any, 100);
             expect(md).toContain('## Comments');
             expect(md).toContain('- root_comments: 2');
-            expect(md).toContain('|-- [comment comment_id=c1 parent_id=null path=1 depth=0 author=u/a score=10]');
-            expect(md).toContain('|   |-- [comment comment_id=c2 parent_id=c1 path=1.1 depth=1 author=u/b score=7]');
-            expect(md).toContain('|   `-- [comment comment_id=c3 parent_id=c1 path=1.2 depth=1 author=u/c score=4]');
-            expect(md).toContain('`-- [comment comment_id=c4 parent_id=null path=2 depth=0 author=u/d score=3]');
+            expect(md).toMatch(/- exported_at_utc: \d{10}/);
+            expect(md).toContain('field_legend: node(id,p,x,d,a,s,t)');
+            expect(md).toContain('|-- [node id=c1 p=null x=1 d=0 a=a s=10]');
+            expect(md).toContain('|   |-- [node id=c2 p=c1 x=1.1 d=1 a=b s=7]');
+            expect(md).toContain('|   `-- [node id=c3 p=c1 x=1.2 d=1 a=c s=4]');
+            expect(md).toContain('`-- [node id=c4 p=null x=2 d=0 a=d s=3]');
+            expect(md).toContain('\n\n`-- [node id=c4 p=null x=2 d=0 a=d s=3]');
             expect(md).toContain('|   text: |');
         });
     });
