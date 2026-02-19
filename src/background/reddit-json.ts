@@ -1,4 +1,4 @@
-import { RedditPostPayload } from '../content/reddit-extract';
+import type { RedditPostPayload } from '../content/reddit-extract';
 import { buildRedditPostPayload } from '../shared/reddit-post-payload';
 
 type RedditPostData = any;

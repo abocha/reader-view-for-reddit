@@ -1,12 +1,16 @@
-import browser, { Tabs } from 'webextension-polyfill';
-import { extractRedditPost, ExtractionResult, RedditPostPayload } from '../content/reddit-extract';
+import type { Tabs } from 'webextension-polyfill';
+import browser from 'webextension-polyfill';
+import type { ExtractionResult, RedditPostPayload } from '../content/reddit-extract';
+import { extractRedditPost } from '../content/reddit-extract';
 import { fetchRedditPostPayloadFromJson } from './reddit-json';
-import { perf, PerfReport, summarize } from '../perf/trace';
+import type { PerfReport } from '../perf/trace';
+import { perf, summarize } from '../perf/trace';
 import { recordSessionToken } from '../shared/session-token-cache';
 import { normalizeRedditPostCacheKey } from './cache-keys';
 import { getCachedPayload, setCachedPayload } from './payload-cache';
 import { getCachedComments, setCachedComments } from './comments-cache';
-import { cleanupPendingTokens, PendingTokenEntry } from './pending-token-cleanup';
+import type { PendingTokenEntry } from './pending-token-cleanup';
+import { cleanupPendingTokens } from './pending-token-cleanup';
 import { installRuntimeMessageListener } from './runtime-messages';
 
 // --- Core Logic ---

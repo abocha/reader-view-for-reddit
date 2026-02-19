@@ -42,13 +42,13 @@ export function createCommentsCache(options: CommentsCacheOptions = {}): Comment
     };
 
     const set = (key: string, value: unknown): CommentsCacheSetResult => {
-        let bytes = 0;
+        let bytes: number;
         try {
             bytes = JSON.stringify(value).length;
-            if (bytes > maxBytes) return { ok: false, reason: 'too_large', bytes };
         } catch {
             return { ok: false, reason: 'not_serializable' };
         }
+        if (bytes > maxBytes) return { ok: false, reason: 'too_large', bytes };
 
         cache.set(key, { value, expiresAt: now() + ttlMs });
         while (cache.size > maxEntries) {

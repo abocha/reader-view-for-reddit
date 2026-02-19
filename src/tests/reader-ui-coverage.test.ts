@@ -1,10 +1,9 @@
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // @ts-ignore
-import browser from 'webextension-polyfill';
 
-	describe('Reader UI Coverage', () => {
+describe('Reader UI Coverage', () => {
 
 	    beforeEach(() => {
 	        vi.resetModules();

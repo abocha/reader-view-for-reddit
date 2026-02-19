@@ -38,6 +38,7 @@ This repository uses in-repo documentation as the system of record.
 ## Development
 
 - Build: `pnpm build`
+- Lint: `pnpm lint`
 - Typecheck: `pnpm typecheck`
 - Run in Firefox: `pnpm start:firefox`
 
@@ -53,6 +54,7 @@ This repository uses in-repo documentation as the system of record.
 
 - Preflight checks only:
   - `pnpm release:preflight`
+  - Includes: `lint`, `typecheck`, `test`, `build`
 - Create and publish a semver release tag (CI will build/package/release on GitHub):
   - `pnpm release:patch`
   - `pnpm release:minor`
@@ -69,7 +71,7 @@ Tag release flow:
 
 Main-only workflow note:
 - This repo ships by commits directly to `main` (no PR requirement).
-- A dedicated `ci` workflow runs `typecheck` + `test` on every push to `main`.
+- A dedicated `ci` workflow runs `lint` + `typecheck` + `test` on every push to `main`.
 - Cut release tags only after `main` CI is green.
 
 Action pinning note:

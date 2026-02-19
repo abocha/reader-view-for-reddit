@@ -12,6 +12,8 @@
 ## Build, Test, and Development Commands
 - `pnpm build`: clean and bundle into `dist/`.
 - `pnpm dev`: watch build for local iteration.
+- `pnpm lint`: run ESLint (TS + Node scripts).
+- `pnpm lint:fix`: apply ESLint auto-fixes.
 - `pnpm typecheck`: run strict TypeScript checks (`tsc -p tsconfig.json`).
 - `pnpm test`: run all Vitest tests.
 - `pnpm test:coverage`: run tests with V8 coverage report.

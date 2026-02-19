@@ -1,5 +1,5 @@
 import browser from 'webextension-polyfill';
-import { PerfReport } from '../perf/trace';
+import type { PerfReport } from '../perf/trace';
 
 type MessageHandlerDeps = {
     onPerfReport: (report: PerfReport) => void;

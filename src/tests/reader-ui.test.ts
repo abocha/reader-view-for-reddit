@@ -1,12 +1,11 @@
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
     renderArticle,
     renderMedia,
     buildVisibilityPlan,
     renderCommentTree,
-    initPreferences,
-    sanitizeHtmlToFragment
+    initPreferences
 } from '../pages/reader-host';
 
 // Mock getElementById to return elements from our simulated body

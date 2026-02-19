@@ -1,6 +1,7 @@
 import browser from 'webextension-polyfill';
-import { RedditPostPayload } from '../content/reddit-extract';
-import { perf, PerfReport } from '../perf/trace';
+import type { RedditPostPayload } from '../content/reddit-extract';
+import type { PerfReport } from '../perf/trace';
+import { perf } from '../perf/trace';
 import { touchSessionToken } from '../shared/session-token-cache';
 
 const SHOULD_DEBUG_LOG = typeof __DEV__ !== 'undefined' && __DEV__;
@@ -315,9 +316,14 @@ async function waitForPendingPayload(expectedTraceId: string, hostEvents: Return
 
     let resolved = false;
     const pendingKey = `pending_token:${expectedTraceId}`;
-    let timeoutId: number;
-    let intervalId: number;
     let onMsg: (msg: unknown) => void = () => undefined;
+
+    const timeoutId = window.setTimeout(() => {
+        void resolveError('timeout', 'Timed out waiting for article data. Please try again.');
+    }, 12000);
+
+    // Poll storage to avoid missing a one-shot runtime message.
+    const intervalId = window.setInterval(() => void tryStorage(), 200);
 
     const cleanup = () => {
         window.clearTimeout(timeoutId);
@@ -363,12 +369,6 @@ async function waitForPendingPayload(expectedTraceId: string, hostEvents: Return
             // ignore
         }
     };
-    timeoutId = window.setTimeout(() => {
-        void resolveError('timeout', 'Timed out waiting for article data. Please try again.');
-    }, 12000);
-
-    // Poll storage to avoid missing a one-shot runtime message.
-    intervalId = window.setInterval(() => void tryStorage(), 200);
     void tryStorage();
 
     onMsg = (msg: unknown) => {
@@ -477,7 +477,7 @@ async function initTokenProtocol(token: string, hostEvents: ReturnType<typeof pe
             await browser.runtime.sendMessage({ type: 'PERF_REPORT', report });
         }
         await browser.runtime.sendMessage({ type: 'READER_CONTENT_READY', traceId });
-    } catch (e) { /* ignore */ }
+    } catch { /* ignore */ }
 }
 
 function applyBenchmarkOverrides() {
