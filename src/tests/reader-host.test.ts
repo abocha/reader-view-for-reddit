@@ -215,11 +215,12 @@ describe('Reader Host Logic', () => {
     describe('parseCommentsListing', () => {
         it('should detect "more" placeholders', () => {
             const result = parseCommentsListing([
-                { kind: 'more', data: {} },
+                { kind: 'more', data: { children: ['c9'] } },
                 { kind: 't1', data: { id: 'c1', author: 'a', body: 'hi', replies: '' } },
             ]);
 
             expect(result.hasMore).toBe(true);
+            expect(result.rootMoreChildrenIds).toEqual(['c9']);
             expect(result.loadedCount).toBe(1);
             expect(result.comments.length).toBe(1);
         });
@@ -329,6 +330,9 @@ describe('Reader Host Logic', () => {
             expect(md).toMatch(/- exported_at_utc: \d{10}/);
             expect(md).toContain('field_legend: node(id,p,x,d,a,s,t)');
             expect(md).toContain('smart_comments: false');
+            expect(md).toContain('deep_loaded: false');
+            expect(md).toContain('deep_load_scope: none');
+            expect(md).toContain('deep_load_truncated: false');
             expect(md).toContain('|-- [node id=c1 p=null x=1 d=0 a=a s=10]');
             expect(md).toContain('|   |-- [node id=c2 p=c1 x=1.1 d=1 a=b s=7]');
             expect(md).toContain('|   `-- [node id=c3 p=c1 x=1.2 d=1 a=c s=4]');

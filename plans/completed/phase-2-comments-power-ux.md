@@ -1,10 +1,14 @@
 # Execution Plan: Phase 2 - Comments Power UX
 
 ## Metadata
-- Status: proposed
+- Status: completed
 - Owner: @abocha
 - Priority: p1
-- Related Issue/PR: `plans/active/comments-experience-roadmap.md`
+- Related Issue/PR: `plans/completed/comments-experience-roadmap.md`
+
+## Completion
+- Completed: 2026-02-19
+- Verification: feature set present in code/tests and full checks passing (`pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm docs:check`).
 
 ## Summary
 Phase 2 adds focused power-user controls without bloating UI complexity: in-thread search/filtering, bulk expand/collapse/reset actions, and downloadable markdown export parity with copy flows.

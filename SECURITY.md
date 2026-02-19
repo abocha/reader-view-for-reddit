@@ -19,10 +19,12 @@
 - Runtime message handlers validate message shape and key lengths.
 - Pending token/session entries are TTL-scoped and periodically cleaned.
 - Performance/reporting storage is bounded.
+- Deep comment loading uses existing Reddit host permissions from the reader page; no new broad runtime message API was added.
 
 ## Markdown export safety
 - Copy/export output is plain markdown text only; it does not introduce a new execution boundary.
 - Comment tree connectors are presentation-only; downstream parsing should rely on explicit structural fields.
+- Deep-loading metadata fields are informational and do not introduce executable behavior.
 
 ## Required Review Checklist for Changes
 - Are all new URLs parsed and protocol-validated?

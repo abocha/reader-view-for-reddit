@@ -16,7 +16,37 @@ type CommentNode = {
     bodyHtml: string;
     score?: number;
     createdUtc?: number;
+    moreChildrenIds?: string[];
     replies: CommentNode[];
+};
+
+type MorePlaceholder = {
+    parentId: string | null;
+    childrenIds: string[];
+    depth: number;
+    rootId: string | null;
+    sourcePath: string;
+};
+
+type LoadBudget = {
+    maxRequests: number;
+    maxNodes: number;
+    maxMillis: number;
+};
+
+type LoadProgress = {
+    requestsUsed: number;
+    nodesLoaded: number;
+    placeholdersResolved: number;
+    truncated: boolean;
+    errors: string[];
+};
+
+type CommentsMergeResult = {
+    insertedCount: number;
+    updatedCount: number;
+    newPlaceholders: MorePlaceholder[];
+    orphansSkipped: number;
 };
 
 type NodeStats = {
@@ -81,6 +111,20 @@ let benchmarkAutoComments = false;
 let pendingScrollAnchor: { commentId: string; top: number } | null = null;
 let pendingCommentFocusId: string | null = null;
 let currentCommentsHasMore = false;
+let currentHasMoreMarker = false;
+let currentRootMoreChildrenIds: string[] = [];
+let commentsRenderSeq = 0;
+let commentsDeepLoadSeq = 0;
+let activeDeepLoadParentId: string | null = null;
+let deepLoadState: {
+    loaded: boolean;
+    scope: 'none' | 'branch' | 'root';
+    truncated: boolean;
+} = {
+    loaded: false,
+    scope: 'none',
+    truncated: false,
+};
 
 const COMMENTS_LIMIT_OPTIONS = [50, 100, 200, 300, 400, 500] as const;
 const COMMENTS_SORT_OPTIONS = new Set(['best', 'top', 'new', 'old', 'controversial']);
@@ -89,6 +133,14 @@ const DEFAULT_VISIBILITY_POLICY: Omit<VisibilityPolicy, 'depthLimit' | 'smartMod
     siblingCloseDelta: 0.6,
     maxExtraDeepVisiblePerRoot: 12,
 };
+const DEFAULT_DEEP_LOAD_BUDGET: LoadBudget = {
+    maxRequests: 10,
+    maxNodes: 350,
+    maxMillis: 3500,
+};
+const MORECHILDREN_BATCH_SIZE = 25;
+const CHUNKED_RENDER_NODE_THRESHOLD = 220;
+const CHUNKED_RENDER_ROOT_BATCH = 3;
 const COMMENTS_PREF_KEYS = {
     visible: 'reader-comments-visible',
     depth: 'reader-comments-depth',
@@ -214,9 +266,10 @@ function updateCommentsFooter(options: { hasMore: boolean; limit: number; loadin
     const footer = document.getElementById('comments-footer') as HTMLElement | null;
     if (!footer) return;
 
-    const shouldShow = options.hasMore && options.limit < 500;
+    const hasResolvable = hasResolvableMorePlaceholders();
+    const shouldShow = options.hasMore;
     const loading = Boolean(options.loading);
-    const showRedditLink = !loading && options.hasMore && options.limit >= 500;
+    const showRedditLink = !loading && !hasResolvable && currentHasMoreMarker && options.limit >= 500;
     footer.classList.toggle('is-hidden', !shouldShow && !loading && !showRedditLink);
 
     let btn = footer.querySelector<HTMLButtonElement>('button[data-role="load-more-comments"]');
@@ -237,7 +290,11 @@ function updateCommentsFooter(options: { hasMore: boolean; limit: number; loadin
     } else {
         btn.classList.remove('is-busy');
         btn.removeAttribute('aria-busy');
-        btn.textContent = showRedditLink ? 'See more comments on Reddit' : 'Load more comments';
+        btn.textContent = showRedditLink
+            ? 'See more comments on Reddit'
+            : hasResolvable
+                ? 'Load more from Reddit'
+                : 'Load more comments';
     }
 
     if (showRedditLink) {
@@ -254,14 +311,18 @@ function updateCommentsFooter(options: { hasMore: boolean; limit: number; loadin
 
     if (shouldShow && !loading) {
         btn.onclick = () => {
-            const currentLimit = getCommentsLimit();
             pendingScrollAnchor = captureCommentsScrollAnchor();
-            const limitEl = document.getElementById('comments-limit') as HTMLSelectElement | null;
-            const idx = COMMENTS_LIMIT_OPTIONS.indexOf(currentLimit as any);
-            const next = COMMENTS_LIMIT_OPTIONS[Math.min(COMMENTS_LIMIT_OPTIONS.length - 1, Math.max(0, idx) + 1)] ?? 500;
-            if (limitEl) limitEl.value = String(next);
-            persistCommentsPreference('limit', String(next));
-            void loadComments({ reason: 'load_more', preserveExisting: true });
+            if (!hasResolvable && currentHasMoreMarker && options.limit < 500) {
+                const currentLimit = getCommentsLimit();
+                const limitEl = document.getElementById('comments-limit') as HTMLSelectElement | null;
+                const idx = COMMENTS_LIMIT_OPTIONS.indexOf(currentLimit as any);
+                const next = COMMENTS_LIMIT_OPTIONS[Math.min(COMMENTS_LIMIT_OPTIONS.length - 1, Math.max(0, idx) + 1)] ?? 500;
+                if (limitEl) limitEl.value = String(next);
+                persistCommentsPreference('limit', String(next));
+                void loadComments({ reason: 'load_more', preserveExisting: true });
+                return;
+            }
+            void loadMoreCommentsForScope(null);
         };
     }
 }
@@ -1082,6 +1143,8 @@ export function initCommentsUI() {
             commentsAbort?.abort();
             commentsAbort = null;
             commentsLoadSeq += 1;
+            commentsDeepLoadSeq += 1;
+            activeDeepLoadParentId = null;
             return;
         }
         if (currentComments.length === 0) void loadComments({ reason: 'init' });
@@ -1093,6 +1156,8 @@ export function initCommentsUI() {
             persistCommentsPreference('sort', sortEl.value);
         }
         if (!commentsVisible) return;
+        commentsDeepLoadSeq += 1;
+        activeDeepLoadParentId = null;
         void loadComments({ reason: 'filter', preserveExisting: true });
     };
 
@@ -1615,9 +1680,12 @@ async function loadComments(options: LoadCommentsOptions = {}) {
             ? 'Comments are unavailable (fallback extraction was used).'
             : 'Comments are unavailable for this post.');
         listEl.replaceChildren();
+        currentRootMoreChildrenIds = [];
+        currentHasMoreMarker = false;
         currentCommentsHasMore = false;
         updateCommentsFooter({ hasMore: currentCommentsHasMore, limit: getCommentsLimit(), loading: false, permalink: currentPost?.permalink });
         currentComments = [];
+        deepLoadState = { loaded: false, scope: 'none', truncated: false };
         return;
     }
 
@@ -1660,15 +1728,24 @@ async function loadComments(options: LoadCommentsOptions = {}) {
                 const cachedComments = (value as any).comments as CommentNode[] | undefined;
                 const loadedCount = Number((value as any).loadedCount);
                 const hasMore = Boolean((value as any).hasMore);
+                const hasMoreMarker = typeof (value as any).hasMoreMarker === 'boolean'
+                    ? Boolean((value as any).hasMoreMarker)
+                    : hasMore;
+                const rootMoreChildrenIds = dedupeIds(parseMoreChildrenIds((value as any).rootMoreChildrenIds));
                 const totalCount = typeof (value as any).totalCount === 'number' ? (value as any).totalCount : undefined;
 
                 if (Array.isArray(cachedComments) && requestSeq === commentsLoadSeq && commentsVisible) {
                     currentComments = cachedComments;
-                    currentCommentsHasMore = hasMore;
+                    currentRootMoreChildrenIds = rootMoreChildrenIds;
+                    currentHasMoreMarker = hasMoreMarker;
+                    currentCommentsHasMore = hasMoreMarker;
                     expandedMoreById.clear();
                     expandedLowScoreById.clear();
                     collapsedById.clear();
                     autoModeratorExpandedById.clear();
+                    deepLoadState = { loaded: false, scope: 'none', truncated: false };
+                    activeDeepLoadParentId = null;
+                    refreshCommentsHasMore();
 
                     setCommentsStatus(
                         statusEl,
@@ -1682,7 +1759,7 @@ async function loadComments(options: LoadCommentsOptions = {}) {
                     rerenderComments();
                     events.push(renderSpan.startEvent, renderSpan.end({ cached: true }));
                     restoreCommentsScrollAnchor();
-                    updateCommentsFooter({ hasMore, limit, loading: false, permalink: currentPost?.permalink });
+                    updateCommentsFooter({ hasMore: currentCommentsHasMore, limit, loading: false, permalink: currentPost?.permalink });
                     return;
                 }
             }
@@ -1704,14 +1781,24 @@ async function loadComments(options: LoadCommentsOptions = {}) {
         const commentsListing = data?.[1]?.data?.children;
 
         const parsed = parseCommentsListing(commentsListing);
-        events.push(parseSpan.startEvent, parseSpan.end({ loadedCount: parsed.loadedCount, hasMore: parsed.hasMore, totalCount }));
+        events.push(parseSpan.startEvent, parseSpan.end({
+            loadedCount: parsed.loadedCount,
+            hasMore: parsed.hasMore,
+            rootMoreChildren: parsed.rootMoreChildrenIds.length,
+            totalCount
+        }));
         if (requestSeq !== commentsLoadSeq || !commentsVisible) return;
         currentComments = parsed.comments;
+        currentRootMoreChildrenIds = parsed.rootMoreChildrenIds;
+        currentHasMoreMarker = parsed.hasMore;
         currentCommentsHasMore = parsed.hasMore;
         expandedMoreById.clear();
         expandedLowScoreById.clear();
         collapsedById.clear();
         autoModeratorExpandedById.clear();
+        deepLoadState = { loaded: false, scope: 'none', truncated: false };
+        activeDeepLoadParentId = null;
+        refreshCommentsHasMore();
 
         setCommentsStatus(
             statusEl,
@@ -1724,7 +1811,14 @@ async function loadComments(options: LoadCommentsOptions = {}) {
             const res = await browser.runtime.sendMessage({
                 type: 'COMMENTS_CACHE_SET',
                 key: cacheKey,
-                value: { comments: parsed.comments, loadedCount: parsed.loadedCount, hasMore: parsed.hasMore, totalCount },
+                value: {
+                    comments: parsed.comments,
+                    loadedCount: parsed.loadedCount,
+                    hasMore: parsed.hasMore,
+                    hasMoreMarker: parsed.hasMore,
+                    rootMoreChildrenIds: parsed.rootMoreChildrenIds,
+                    totalCount
+                },
             });
             if (res && typeof res === 'object') {
                 events.push(cacheSetSpan.end(res as any));
@@ -1734,7 +1828,7 @@ async function loadComments(options: LoadCommentsOptions = {}) {
         } catch {
             events.push(cacheSetSpan.end({ ok: false, reason: 'send_failed' }));
         }
-        updateCommentsFooter({ hasMore: parsed.hasMore, limit, loading: false, permalink: currentPost?.permalink });
+        updateCommentsFooter({ hasMore: currentCommentsHasMore, limit, loading: false, permalink: currentPost?.permalink });
         const renderSpan = perf.span('comments:render');
         rerenderComments();
         events.push(renderSpan.startEvent, renderSpan.end());
@@ -1757,7 +1851,11 @@ async function loadComments(options: LoadCommentsOptions = {}) {
         if (!preserveExisting) {
             listEl.replaceChildren();
             currentComments = [];
+            currentRootMoreChildrenIds = [];
+            currentHasMoreMarker = false;
             currentCommentsHasMore = false;
+            deepLoadState = { loaded: false, scope: 'none', truncated: false };
+            activeDeepLoadParentId = null;
         }
         updateCommentsFooter({ hasMore: currentCommentsHasMore, limit, loading: false, permalink: currentPost?.permalink });
     } finally {
@@ -1925,25 +2023,57 @@ export function cleanRedditHtml(html: string): string {
     return (html || '').replace(/<!-- SC_OFF -->/g, '').replace(/<!-- SC_ON -->/g, '');
 }
 
-export function parseCommentsListing(children: any[] | undefined): { comments: CommentNode[]; loadedCount: number; hasMore: boolean } {
-    if (!Array.isArray(children)) return { comments: [], loadedCount: 0, hasMore: false };
+function normalizeThingId(value: unknown): string | null {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (trimmed.startsWith('t1_') || trimmed.startsWith('t3_')) return trimmed.slice(3);
+    return trimmed;
+}
+
+function parseMoreChildrenIds(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    return value
+        .map(item => (typeof item === 'string' ? item.trim() : ''))
+        .filter(Boolean);
+}
+
+function dedupeIds(ids: string[]): string[] {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const id of ids) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+        out.push(id);
+    }
+    return out;
+}
+
+function countCommentNodes(node: CommentNode): number {
+    let n = 1;
+    for (const child of node.replies) n += countCommentNodes(child);
+    return n;
+}
+
+export function parseCommentsListing(children: any[] | undefined): {
+    comments: CommentNode[];
+    loadedCount: number;
+    hasMore: boolean;
+    rootMoreChildrenIds: string[];
+} {
+    if (!Array.isArray(children)) return { comments: [], loadedCount: 0, hasMore: false, rootMoreChildrenIds: [] };
 
     let loadedCount = 0;
     let hasMore = false;
+    const rootMoreChildrenIds: string[] = [];
 
     const comments: CommentNode[] = [];
-
-    // Helper to recursively count
-    const countNodes = (node: CommentNode): number => {
-        let n = 1;
-        for (const child of node.replies) n += countNodes(child);
-        return n;
-    };
 
     for (const child of children) {
         if (!child || typeof child !== 'object') continue;
         if (child.kind === 'more') {
             hasMore = true;
+            rootMoreChildrenIds.push(...parseMoreChildrenIds((child as any)?.data?.children));
             continue;
         }
         if (child.kind !== 't1') continue;
@@ -1951,11 +2081,11 @@ export function parseCommentsListing(children: any[] | undefined): { comments: C
         const node = parseComment(child, 10);
         if (!node) continue;
 
-        loadedCount += countNodes(node);
+        loadedCount += countCommentNodes(node);
         comments.push(node);
     }
 
-    return { comments, loadedCount, hasMore };
+    return { comments, loadedCount, hasMore, rootMoreChildrenIds: dedupeIds(rootMoreChildrenIds) };
 }
 
 export function parseComment(wrapper: any, remainingDepth: number): CommentNode | null {
@@ -1971,11 +2101,16 @@ export function parseComment(wrapper: any, remainingDepth: number): CommentNode 
     }
 
     const replies: CommentNode[] = [];
-    if (remainingDepth > 0 && data.replies && typeof data.replies === 'object') {
+    const moreChildrenIds: string[] = [];
+    if (data.replies && typeof data.replies === 'object') {
         const children = data?.replies?.data?.children;
         if (Array.isArray(children)) {
             for (const child of children) {
-                if (child?.kind !== 't1') continue;
+                if (child?.kind === 'more') {
+                    moreChildrenIds.push(...parseMoreChildrenIds(child?.data?.children));
+                    continue;
+                }
+                if (child?.kind !== 't1' || remainingDepth <= 0) continue;
                 const reply = parseComment(child, remainingDepth - 1);
                 if (reply) replies.push(reply);
             }
@@ -1989,14 +2124,398 @@ export function parseComment(wrapper: any, remainingDepth: number): CommentNode 
         bodyHtml,
         score: typeof data.score === 'number' ? data.score : undefined,
         createdUtc: typeof data.created_utc === 'number' ? data.created_utc : undefined,
+        moreChildrenIds: dedupeIds(moreChildrenIds),
         replies,
     };
+}
+
+function resolveCurrentPostId(): string | null {
+    if (currentPost?.postId) return currentPost.postId;
+    const permalink = currentPost?.permalink || '';
+    const match = permalink.match(/\/comments\/([^/]+)/i);
+    return match?.[1] ?? null;
+}
+
+function countLoadedComments(comments: CommentNode[]): number {
+    let total = 0;
+    for (const comment of comments) total += countCommentNodes(comment);
+    return total;
+}
+
+function countMoreChildrenIds(node: CommentNode): number {
+    const own = node.moreChildrenIds?.length ?? 0;
+    let nested = 0;
+    for (const reply of node.replies) nested += countMoreChildrenIds(reply);
+    return own + nested;
+}
+
+function hasResolvableMorePlaceholders(): boolean {
+    if (currentRootMoreChildrenIds.length > 0) return true;
+    return currentComments.some(comment => countMoreChildrenIds(comment) > 0);
+}
+
+function refreshCommentsHasMore(): void {
+    currentCommentsHasMore = currentHasMoreMarker || hasResolvableMorePlaceholders();
+}
+
+function findCommentById(commentId: string): CommentNode | null {
+    if (!commentId) return null;
+    const queue = [...currentComments];
+    while (queue.length > 0) {
+        const node = queue.shift()!;
+        if (node.id === commentId) return node;
+        if (node.replies.length > 0) queue.push(...node.replies);
+    }
+    return null;
+}
+
+type CommentsIndex = {
+    byId: Map<string, CommentNode>;
+    depthById: Map<string, number>;
+    parentById: Map<string, string | null>;
+};
+
+function buildCommentsIndex(roots: CommentNode[]): CommentsIndex {
+    const byId = new Map<string, CommentNode>();
+    const depthById = new Map<string, number>();
+    const parentById = new Map<string, string | null>();
+
+    const walk = (node: CommentNode, depth: number, parentId: string | null) => {
+        byId.set(node.id, node);
+        depthById.set(node.id, depth);
+        parentById.set(node.id, parentId);
+        for (const reply of node.replies) walk(reply, depth + 1, node.id);
+    };
+
+    for (const root of roots) walk(root, 0, null);
+    return { byId, depthById, parentById };
+}
+
+function collectPlaceholdersFromNode(
+    node: CommentNode,
+    depth: number,
+    rootId: string | null,
+    sourcePath: string,
+    out: MorePlaceholder[],
+): void {
+    const ids = dedupeIds(node.moreChildrenIds ?? []);
+    if (ids.length > 0) {
+        out.push({
+            parentId: node.id,
+            childrenIds: ids,
+            depth,
+            rootId,
+            sourcePath,
+        });
+    }
+
+    for (let i = 0; i < node.replies.length; i += 1) {
+        const child = node.replies[i]!;
+        collectPlaceholdersFromNode(child, depth + 1, rootId, `${sourcePath}.${i + 1}`, out);
+    }
+}
+
+function collectMorePlaceholdersForScope(scopeParentId: string | null): MorePlaceholder[] {
+    const placeholders: MorePlaceholder[] = [];
+
+    if (scopeParentId === null) {
+        if (currentRootMoreChildrenIds.length > 0) {
+            placeholders.push({
+                parentId: null,
+                childrenIds: dedupeIds(currentRootMoreChildrenIds),
+                depth: 0,
+                rootId: null,
+                sourcePath: 'root',
+            });
+        }
+
+        for (let i = 0; i < currentComments.length; i += 1) {
+            const root = currentComments[i]!;
+            collectPlaceholdersFromNode(root, 0, root.id, `${i + 1}`, placeholders);
+        }
+        return placeholders;
+    }
+
+    const node = findCommentById(scopeParentId);
+    if (!node) return placeholders;
+    collectPlaceholdersFromNode(node, 0, node.id, node.id, placeholders);
+    return placeholders;
+}
+
+function consumePlaceholderIdsForParent(parentId: string | null, consumedIds: string[]): void {
+    const consumed = new Set(consumedIds);
+    if (consumed.size === 0) return;
+
+    if (parentId === null) {
+        currentRootMoreChildrenIds = currentRootMoreChildrenIds.filter(id => !consumed.has(id));
+        return;
+    }
+
+    const parent = findCommentById(parentId);
+    if (!parent) return;
+    parent.moreChildrenIds = (parent.moreChildrenIds ?? []).filter(id => !consumed.has(id));
+}
+
+function appendPlaceholderIdsToParent(index: CommentsIndex, parentId: string | null, ids: string[]): void {
+    const nextIds = dedupeIds(ids);
+    if (nextIds.length === 0) return;
+
+    if (parentId === null) {
+        currentRootMoreChildrenIds = dedupeIds([...currentRootMoreChildrenIds, ...nextIds]);
+        return;
+    }
+
+    const parent = index.byId.get(parentId);
+    if (!parent) return;
+    parent.moreChildrenIds = dedupeIds([...(parent.moreChildrenIds ?? []), ...nextIds]);
+}
+
+function attachChildNode(
+    roots: CommentNode[],
+    index: CommentsIndex,
+    parentId: string | null,
+    node: CommentNode,
+): boolean {
+    if (parentId === null) {
+        if (!roots.some(root => root.id === node.id)) {
+            roots.push(node);
+        }
+        index.parentById.set(node.id, null);
+        index.depthById.set(node.id, 0);
+        return true;
+    }
+
+    const parent = index.byId.get(parentId);
+    if (!parent) return false;
+
+    if (!parent.replies.some(reply => reply.id === node.id)) {
+        parent.replies.push(node);
+    }
+    const parentDepth = index.depthById.get(parentId) ?? 0;
+    index.parentById.set(node.id, parentId);
+    index.depthById.set(node.id, parentDepth + 1);
+    return true;
+}
+
+function mergeIncomingCommentNode(
+    roots: CommentNode[],
+    index: CommentsIndex,
+    result: CommentsMergeResult,
+    parentId: string | null,
+    incoming: CommentNode,
+): CommentNode | null {
+    const existing = index.byId.get(incoming.id);
+    if (existing) {
+        existing.author = incoming.author || existing.author;
+        existing.bodyMarkdown = incoming.bodyMarkdown || existing.bodyMarkdown;
+        existing.bodyHtml = incoming.bodyHtml || existing.bodyHtml;
+        existing.score = typeof incoming.score === 'number' ? incoming.score : existing.score;
+        existing.createdUtc = typeof incoming.createdUtc === 'number' ? incoming.createdUtc : existing.createdUtc;
+        existing.moreChildrenIds = dedupeIds([...(existing.moreChildrenIds ?? []), ...(incoming.moreChildrenIds ?? [])]);
+        if (parentId === null || index.byId.has(parentId)) {
+            void attachChildNode(roots, index, parentId, existing);
+        }
+        result.updatedCount += 1;
+        for (const child of incoming.replies) {
+            mergeIncomingCommentNode(roots, index, result, existing.id, child);
+        }
+        return existing;
+    }
+
+    const created: CommentNode = {
+        id: incoming.id,
+        author: incoming.author,
+        bodyMarkdown: incoming.bodyMarkdown,
+        bodyHtml: incoming.bodyHtml,
+        score: incoming.score,
+        createdUtc: incoming.createdUtc,
+        moreChildrenIds: dedupeIds(incoming.moreChildrenIds ?? []),
+        replies: [],
+    };
+
+    if (!attachChildNode(roots, index, parentId, created)) {
+        result.orphansSkipped += 1;
+        return null;
+    }
+
+    index.byId.set(created.id, created);
+    result.insertedCount += 1;
+    for (const child of incoming.replies) {
+        mergeIncomingCommentNode(roots, index, result, created.id, child);
+    }
+    return created;
+}
+
+function normalizeParentCommentId(parentThingId: unknown, postId: string): string | null {
+    if (typeof parentThingId !== 'string' || !parentThingId) return null;
+    if (parentThingId.startsWith('t3_')) return null;
+    const normalized = normalizeThingId(parentThingId);
+    if (!normalized || normalized === postId) return null;
+    return normalized;
+}
+
+function mergeMoreChildrenThings(things: any[], postId: string): CommentsMergeResult {
+    const result: CommentsMergeResult = {
+        insertedCount: 0,
+        updatedCount: 0,
+        newPlaceholders: [],
+        orphansSkipped: 0,
+    };
+    if (!Array.isArray(things) || things.length === 0) return result;
+
+    const index = buildCommentsIndex(currentComments);
+
+    for (const thing of things) {
+        if (!thing || typeof thing !== 'object') continue;
+        if (thing.kind === 't1') {
+            const node = parseComment(thing, 10);
+            if (!node) continue;
+            const parentId = normalizeParentCommentId((thing as any)?.data?.parent_id, postId);
+            const merged = mergeIncomingCommentNode(currentComments, index, result, parentId, node);
+            if (!merged) continue;
+            if ((merged.moreChildrenIds?.length ?? 0) > 0) {
+                result.newPlaceholders.push({
+                    parentId: merged.id,
+                    childrenIds: dedupeIds(merged.moreChildrenIds ?? []),
+                    depth: index.depthById.get(merged.id) ?? 0,
+                    rootId: null,
+                    sourcePath: merged.id,
+                });
+            }
+            continue;
+        }
+
+        if (thing.kind === 'more') {
+            const parentId = normalizeParentCommentId((thing as any)?.data?.parent_id, postId);
+            const childrenIds = parseMoreChildrenIds((thing as any)?.data?.children);
+            appendPlaceholderIdsToParent(index, parentId, childrenIds);
+            result.newPlaceholders.push({
+                parentId,
+                childrenIds,
+                depth: parentId ? (index.depthById.get(parentId) ?? 0) + 1 : 0,
+                rootId: null,
+                sourcePath: parentId ?? 'root',
+            });
+        }
+    }
+
+    return result;
+}
+
+async function fetchMoreChildrenThings(postId: string, childrenIds: string[], sort: string): Promise<any[]> {
+    const base = new URL('https://www.reddit.com/api/morechildren.json');
+    base.searchParams.set('api_type', 'json');
+    base.searchParams.set('raw_json', '1');
+    base.searchParams.set('link_id', `t3_${postId}`);
+    base.searchParams.set('children', childrenIds.join(','));
+    base.searchParams.set('sort', sort || 'best');
+    base.searchParams.set('limit_children', 'false');
+
+    const response = await fetch(base.toString(), { credentials: 'include' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    const things = data?.json?.data?.things;
+    return Array.isArray(things) ? things : [];
+}
+
+async function loadMoreCommentsForScope(parentId: string | null): Promise<void> {
+    const postId = resolveCurrentPostId();
+    const statusEl = document.getElementById('comments-status') as HTMLElement | null;
+    if (!postId || !statusEl) return;
+    if (!commentsVisible) return;
+
+    const seq = ++commentsDeepLoadSeq;
+    activeDeepLoadParentId = parentId;
+    const limit = getCommentsLimit();
+    const sort = getCommentsSort();
+    const startedAt = Date.now();
+    const progress: LoadProgress = {
+        requestsUsed: 0,
+        nodesLoaded: 0,
+        placeholdersResolved: 0,
+        truncated: false,
+        errors: [],
+    };
+
+    setCommentsStatus(statusEl, 'loading', parentId ? 'Loading more replies…' : 'Loading more comments…');
+    updateCommentsFooter({ hasMore: currentCommentsHasMore, limit, loading: true, permalink: currentPost?.permalink });
+    rerenderComments();
+
+    while (seq === commentsDeepLoadSeq) {
+        const elapsed = Date.now() - startedAt;
+        const budgetHit =
+            progress.requestsUsed >= DEFAULT_DEEP_LOAD_BUDGET.maxRequests ||
+            progress.nodesLoaded >= DEFAULT_DEEP_LOAD_BUDGET.maxNodes ||
+            elapsed >= DEFAULT_DEEP_LOAD_BUDGET.maxMillis;
+        if (budgetHit) {
+            progress.truncated = true;
+            break;
+        }
+
+        const queue = collectMorePlaceholdersForScope(parentId)
+            .filter(item => item.childrenIds.length > 0)
+            .sort((a, b) => {
+                if (a.depth !== b.depth) return a.depth - b.depth;
+                return a.sourcePath.localeCompare(b.sourcePath);
+            });
+
+        if (queue.length === 0) break;
+        const next = queue[0]!;
+        const batch = next.childrenIds.slice(0, MORECHILDREN_BATCH_SIZE);
+        if (batch.length === 0) break;
+
+        progress.requestsUsed += 1;
+        let things: any[];
+        try {
+            things = await fetchMoreChildrenThings(postId, batch, sort);
+        } catch (err) {
+            progress.errors.push((err as Error)?.message || 'unknown_error');
+            break;
+        }
+
+        if (seq !== commentsDeepLoadSeq) return;
+
+        consumePlaceholderIdsForParent(next.parentId, batch);
+        progress.placeholdersResolved += batch.length;
+
+        const merge = mergeMoreChildrenThings(things, postId);
+        progress.nodesLoaded += merge.insertedCount;
+    }
+
+    if (seq !== commentsDeepLoadSeq) return;
+
+    activeDeepLoadParentId = null;
+    refreshCommentsHasMore();
+
+    if (progress.nodesLoaded > 0) {
+        deepLoadState.loaded = true;
+        deepLoadState.scope = parentId ? 'branch' : 'root';
+    }
+    deepLoadState.truncated = deepLoadState.truncated || progress.truncated;
+
+    const totalLoaded = countLoadedComments(currentComments);
+    if (progress.nodesLoaded > 0) {
+        const suffix = progress.truncated ? ' Reached safe load limit for this pass.' : '';
+        setCommentsStatus(statusEl, 'success', `Loaded ${progress.nodesLoaded} more comments. Showing ${totalLoaded} comments.${suffix}`);
+    } else if (progress.errors.length > 0) {
+        setCommentsStatus(statusEl, 'error', 'Failed to load more comments.', {
+            actions: [{ label: 'Retry', onClick: () => void loadMoreCommentsForScope(parentId) }],
+        });
+    } else {
+        const suffix = progress.truncated ? ' Reached safe load limit for this pass.' : '';
+        setCommentsStatus(statusEl, 'info', `No additional comments were available.${suffix}`);
+    }
+
+    updateCommentsFooter({ hasMore: currentCommentsHasMore, limit, loading: false, permalink: currentPost?.permalink });
+    rerenderComments();
+    restoreCommentsScrollAnchor();
 }
 
 function rerenderComments() {
     const listEl = document.getElementById('comments-list') as HTMLElement | null;
     if (!listEl) return;
 
+    const renderSeq = ++commentsRenderSeq;
     captureCommentFocus();
     listEl.replaceChildren();
 
@@ -2023,14 +2542,49 @@ function rerenderComments() {
         expandedMoreIds: expandedMoreById,
         expandedLowScoreIds: expandedLowScoreById,
     };
-
-    for (const top of filteredRoots) {
+    const renderItems = filteredRoots.map((top) => {
         const visibilityPlan = buildVisibilityPlan(top, policy, viewState);
-        listEl.appendChild(renderCommentTree(top, { depthLimit: depth, visibilityPlan, searchActive }, 0, false));
+        return {
+            top,
+            settings: { depthLimit: depth, visibilityPlan, searchActive } as RenderTreeSettings,
+        };
+    });
+
+    const finalize = () => {
+        if (renderSeq !== commentsRenderSeq) return;
+        restoreCommentFocus();
+        scheduleEnhance(listEl);
+    };
+
+    const estimatedNodes = countLoadedComments(filteredRoots);
+    const shouldChunk = estimatedNodes >= CHUNKED_RENDER_NODE_THRESHOLD && renderItems.length > 1;
+    if (!shouldChunk) {
+        for (const item of renderItems) {
+            listEl.appendChild(renderCommentTree(item.top, item.settings, 0, false));
+        }
+        finalize();
+        return;
     }
 
-    restoreCommentFocus();
-    scheduleEnhance(listEl);
+    let cursor = 0;
+    const renderChunk = () => {
+        if (renderSeq !== commentsRenderSeq) return;
+        const frag = document.createDocumentFragment();
+        let renderedRoots = 0;
+        while (cursor < renderItems.length && renderedRoots < CHUNKED_RENDER_ROOT_BATCH) {
+            const item = renderItems[cursor]!;
+            frag.appendChild(renderCommentTree(item.top, item.settings, 0, false));
+            cursor += 1;
+            renderedRoots += 1;
+        }
+        listEl.appendChild(frag);
+        if (cursor < renderItems.length) {
+            window.setTimeout(renderChunk, 0);
+            return;
+        }
+        finalize();
+    };
+    renderChunk();
 }
 
 function getVisibleChildrenFromPlan(comment: CommentNode, plan: VisibilityPlan): {
@@ -2146,22 +2700,27 @@ export function renderCommentTree(
     body.appendChild(sanitizeHtmlToFragment(comment.bodyHtml));
     wrapper.appendChild(body);
 
-    if (comment.replies.length === 0) return wrapper;
+    const unresolvedMoreCount = comment.moreChildrenIds?.length ?? 0;
+    if (comment.replies.length === 0 && unresolvedMoreCount === 0) return wrapper;
 
     const repliesEl = document.createElement('div');
     repliesEl.className = 'comment-replies';
 
     const thisSubtreeUnlimited = unlimitedDepth || expandedMoreById.has(comment.id);
-    const { visible, lowScoreCollapsed, hiddenDepthCount } = getVisibleChildrenFromPlan(
-        comment,
-        settings.visibilityPlan,
-    );
+    let hiddenDepthCount = 0;
+    if (comment.replies.length > 0) {
+        const { visible, lowScoreCollapsed, hiddenDepthCount: hiddenCount } = getVisibleChildrenFromPlan(
+            comment,
+            settings.visibilityPlan,
+        );
+        hiddenDepthCount = hiddenCount;
 
-    for (const child of visible) {
-        repliesEl.appendChild(renderCommentTree(child, settings, currentDepth + 1, thisSubtreeUnlimited));
-    }
-    for (const child of lowScoreCollapsed) {
-        repliesEl.appendChild(renderCommentTree(child, settings, currentDepth + 1, thisSubtreeUnlimited, { forceCollapsed: true, lowScore: true }));
+        for (const child of visible) {
+            repliesEl.appendChild(renderCommentTree(child, settings, currentDepth + 1, thisSubtreeUnlimited));
+        }
+        for (const child of lowScoreCollapsed) {
+            repliesEl.appendChild(renderCommentTree(child, settings, currentDepth + 1, thisSubtreeUnlimited, { forceCollapsed: true, lowScore: true }));
+        }
     }
 
     const actions = document.createElement('div');
@@ -2179,8 +2738,24 @@ export function renderCommentTree(
         actions.appendChild(btn);
     }
 
+    if (unresolvedMoreCount > 0) {
+        const loadBtn = document.createElement('button');
+        loadBtn.className = 'action-btn btn btn--outline btn--sm';
+        loadBtn.type = 'button';
+        const isLoading = activeDeepLoadParentId === comment.id;
+        loadBtn.disabled = isLoading;
+        loadBtn.textContent = isLoading
+            ? 'Loading replies…'
+            : `Load ${unresolvedMoreCount} more repl${unresolvedMoreCount === 1 ? 'y' : 'ies'} from Reddit`;
+        loadBtn.addEventListener('click', () => {
+            pendingScrollAnchor = captureCommentsScrollAnchor();
+            void loadMoreCommentsForScope(comment.id);
+        });
+        actions.appendChild(loadBtn);
+    }
+
     if (actions.childNodes.length > 0) wrapper.appendChild(actions);
-    wrapper.appendChild(repliesEl);
+    if (repliesEl.childNodes.length > 0) wrapper.appendChild(repliesEl);
     return wrapper;
 }
 
@@ -2612,6 +3187,9 @@ function buildPostAndCommentsMarkdown(
     parts.push('- field_legend: node(id,p,x,d,a,s,t)');
     parts.push(`- depth_setting: ${depth}`);
     parts.push(`- smart_comments: ${smartMode ? 'true' : 'false'}`);
+    parts.push(`- deep_loaded: ${deepLoadState.loaded ? 'true' : 'false'}`);
+    parts.push(`- deep_load_scope: ${deepLoadState.scope}`);
+    parts.push(`- deep_load_truncated: ${deepLoadState.truncated ? 'true' : 'false'}`);
     parts.push(`- auto_depth: ${smartMode ? 'true' : 'false'}`);
     parts.push(`- hide_low_score: ${smartMode ? 'true' : 'false'}`);
     parts.push('');

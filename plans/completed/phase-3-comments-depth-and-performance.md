@@ -1,10 +1,14 @@
 # Execution Plan: Phase 3 - Comments Depth and Performance
 
 ## Metadata
-- Status: proposed
+- Status: completed
 - Owner: @abocha
 - Priority: p1/p2
-- Related Issue/PR: `plans/active/comments-experience-roadmap.md`
+- Related Issue/PR: `plans/completed/comments-experience-roadmap.md`
+
+## Completion
+- Completed: 2026-02-19
+- Verification: full checks passing (`pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm docs:check`).
 
 ## Summary
 Phase 3 tackles deeper thread coverage and performance scaling. It introduces optional `morechildren`-based expansion for fuller threads and chunked rendering to keep interactions snappy on typical laptops.

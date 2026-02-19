@@ -98,6 +98,29 @@ describe('Reader Comments Logic', () => {
             expect(node?.bodyHtml).toBe('<pre>&lt;b&gt;md&lt;/b&gt;</pre>');
         });
 
+        it('should keep morechildren ids at depth boundary even when replies are truncated', () => {
+            const raw = {
+                kind: 't1',
+                data: {
+                    id: 'c-depth',
+                    author: 'user',
+                    body: 'root',
+                    replies: {
+                        data: {
+                            children: [
+                                { kind: 'more', data: { children: ['c100'] } },
+                                { kind: 't1', data: { id: 'c101', author: 'child' } },
+                            ],
+                        },
+                    },
+                },
+            };
+
+            const node = parseComment(raw, 0);
+            expect(node?.replies).toEqual([]);
+            expect(node?.moreChildrenIds).toEqual(['c100']);
+        });
+
         it('should parse nested comments', () => {
             const rawListing = [
                 {
@@ -123,6 +146,42 @@ describe('Reader Comments Logic', () => {
             expect(result.comments.length).toBe(1);
             expect(result.comments[0].replies.length).toBe(1);
             expect(result.comments[0].replies[0].id).toBe('child');
+        });
+
+        it('should capture nested morechildren ids on comment nodes', () => {
+            const raw = {
+                kind: 't1',
+                data: {
+                    id: 'parent',
+                    author: 'user',
+                    body: 'parent',
+                    body_html: '<p>parent</p>',
+                    replies: {
+                        data: {
+                            children: [
+                                {
+                                    kind: 'more',
+                                    data: { children: ['c100', 'c101'] },
+                                },
+                            ],
+                        },
+                    },
+                },
+            };
+
+            const parsed = parseComment(raw, 5);
+            expect(parsed?.moreChildrenIds).toEqual(['c100', 'c101']);
+        });
+
+        it('should return root-level morechildren ids from listing', () => {
+            const result = parseCommentsListing([
+                { kind: 'more', data: { children: ['c10', 'c11'] } },
+                { kind: 't1', data: { id: 'c1', author: 'a', body: 'hi', replies: '' } },
+            ]);
+
+            expect(result.hasMore).toBe(true);
+            expect(result.rootMoreChildrenIds).toEqual(['c10', 'c11']);
+            expect(result.loadedCount).toBe(1);
         });
     });
 

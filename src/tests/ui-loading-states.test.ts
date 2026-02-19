@@ -250,6 +250,161 @@ describe('Loading states', () => {
         expect(status.textContent).toContain('Failed to load comments.');
     });
 
+    it('should cache marker hasMore independently from nested placeholders', async () => {
+        const { renderArticle, initCommentsUI } = await import('../pages/reader-host');
+        const { default: browser } = await import('webextension-polyfill') as any;
+
+        (browser.runtime.sendMessage as any).mockImplementation(async (msg: any) => {
+            if (msg?.type === 'COMMENTS_CACHE_GET') return { hit: false };
+            if (msg?.type === 'COMMENTS_CACHE_SET') return { ok: true };
+            return undefined;
+        });
+
+        (globalThis.fetch as any) = vi.fn().mockResolvedValueOnce({
+            ok: true,
+            json: async () => [
+                { kind: 'Listing', data: { children: [{ kind: 't3', data: { num_comments: 2 } }] } },
+                {
+                    kind: 'Listing',
+                    data: {
+                        children: [
+                            {
+                                kind: 't1',
+                                data: {
+                                    id: 'c1',
+                                    author: 'tester',
+                                    body: 'Hello',
+                                    body_html: '<p>Hello</p>',
+                                    score: 3,
+                                    replies: {
+                                        data: {
+                                            children: [{ kind: 'more', data: { children: ['c2'] } }],
+                                        },
+                                    },
+                                },
+                            },
+                        ],
+                    },
+                },
+            ],
+        });
+
+        renderArticle({
+            title: 'Post',
+            author: 'me',
+            subreddit: 'r/test',
+            bodyHtml: '',
+            bodyMarkdown: 'md',
+            url: 'http://test.com',
+            isFallback: false,
+            permalink: '/r/test/comments/123/post',
+            postId: '123',
+        } as any);
+
+        initCommentsUI();
+        await new Promise(r => setTimeout(r, 0));
+        await new Promise(r => setTimeout(r, 0));
+
+        const cacheSetCall = (browser.runtime.sendMessage as any).mock.calls
+            .map((args: any[]) => args[0])
+            .find((msg: any) => msg?.type === 'COMMENTS_CACHE_SET');
+        expect(cacheSetCall).toBeTruthy();
+        expect(cacheSetCall.value.hasMore).toBe(false);
+        expect(cacheSetCall.value.hasMoreMarker).toBe(false);
+        expect(cacheSetCall.value.rootMoreChildrenIds).toEqual([]);
+    });
+
+    it('should resolve branch placeholders via "Load more ... from Reddit"', async () => {
+        const { renderArticle, initCommentsUI } = await import('../pages/reader-host');
+
+        (globalThis.fetch as any) = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => [
+                    { kind: 'Listing', data: { children: [{ kind: 't3', data: { num_comments: 3 } }] } },
+                    {
+                        kind: 'Listing',
+                        data: {
+                            children: [
+                                {
+                                    kind: 't1',
+                                    data: {
+                                        id: 'c1',
+                                        author: 'parent',
+                                        body: 'Parent',
+                                        body_html: '<p>Parent</p>',
+                                        score: 5,
+                                        replies: {
+                                            data: {
+                                                children: [
+                                                    { kind: 'more', data: { children: ['c2'] } },
+                                                ],
+                                            },
+                                        },
+                                    },
+                                },
+                            ],
+                        },
+                    },
+                ],
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    json: {
+                        data: {
+                            things: [
+                                {
+                                    kind: 't1',
+                                    data: {
+                                        id: 'c2',
+                                        parent_id: 't1_c1',
+                                        author: 'child',
+                                        body: 'Deep child',
+                                        body_html: '<p>Deep child</p>',
+                                        score: 3,
+                                        replies: '',
+                                    },
+                                },
+                            ],
+                        },
+                    },
+                }),
+            });
+
+        renderArticle({
+            title: 'Post',
+            author: 'me',
+            subreddit: 'r/test',
+            bodyHtml: '',
+            bodyMarkdown: 'md',
+            url: 'http://test.com',
+            isFallback: false,
+            permalink: '/r/test/comments/123/post',
+            postId: '123',
+        } as any);
+
+        initCommentsUI();
+        await new Promise(r => setTimeout(r, 0));
+        await new Promise(r => setTimeout(r, 0));
+
+        const buttons = Array.from(document.querySelectorAll('button')) as HTMLButtonElement[];
+        const loadBranch = buttons.find(btn => btn.textContent?.includes('Load 1 more reply from Reddit'));
+        expect(loadBranch).toBeTruthy();
+
+        loadBranch?.click();
+        await new Promise(r => setTimeout(r, 0));
+        await new Promise(r => setTimeout(r, 0));
+
+        expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+        const secondUrl = String((globalThis.fetch as any).mock.calls[1]?.[0] || '');
+        expect(secondUrl).toContain('/api/morechildren.json');
+
+        const listEl = document.getElementById('comments-list') as HTMLElement;
+        expect(listEl.textContent).toContain('Deep child');
+    });
+
     it('should not re-show comments when hidden during an in-flight load', async () => {
         const { renderArticle, initCommentsUI } = await import('../pages/reader-host');
         const deferredFetch = deferred<any>();

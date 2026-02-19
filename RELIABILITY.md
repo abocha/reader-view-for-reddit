@@ -19,6 +19,8 @@
 - In-flight requests are abortable.
 - If comments are hidden mid-load, stale responses are ignored.
 - Retry/filter refresh preserves existing rendered comments when possible.
+- Deep-loading (`morechildren`) resolves placeholders in bounded passes and preserves already-rendered comments on partial failure.
+- Budget truncation is explicit and non-fatal: users keep loaded results and can retry.
 
 ## Cache behavior
 - Payload cache: in-memory LRU with TTL.
@@ -35,7 +37,10 @@
 - Deep expansion cap (`maxExtraDeepVisiblePerRoot`) respected under high-branch threads.
 - Negative-with-signal guard works (strong descendant branches are not auto-hidden).
 - Markdown export tree consistency: node `id`/`p`/`x`/`d` align with visible comment order and depth filtering.
+- Placeholder integrity: `rootMoreChildrenIds` and per-node `moreChildrenIds` stay deduplicated and reachable after merges.
+- Deep-load merge behavior: no duplicate comment nodes, no orphan insertion without parent.
+- Chunked rendering: superseded render jobs do not overwrite newer UI state.
 
 ## Known Limits
 - Reddit comments endpoint effectively caps practical loading around ~500 comments.
-- Full `morechildren` traversal is intentionally out of scope today.
+- `morechildren` traversal is intentionally bounded (request/node/time caps) to preserve UI responsiveness.

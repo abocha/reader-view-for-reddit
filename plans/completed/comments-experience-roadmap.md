@@ -1,18 +1,22 @@
 # Execution Plan: Comments Experience Roadmap
 
 ## Metadata
-- Status: proposed
+- Status: completed
 - Owner: @abocha
 - Priority: p0
 - Related Issue/PR: n/a (direct commits to `main`)
+
+## Completion
+- Completed: 2026-02-19
+- Verification: `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm docs:check` all passing.
 
 ## Summary
 This plan turns the current “too good to miss” opportunities into a phased implementation roadmap focused on everyday browsing quality. It prioritizes low-effort, high-impact UX wins first, then adds power features, and finally tackles deeper thread coverage/performance work. The goal is a cleaner, faster, more useful Reader View for both humans and AI-agent workflows.
 
 Companion phase plans:
-- `plans/active/phase-1-comments-foundations.md`
-- `plans/active/phase-2-comments-power-ux.md`
-- `plans/active/phase-3-comments-depth-and-performance.md`
+- `plans/completed/phase-1-comments-foundations.md`
+- `plans/completed/phase-2-comments-power-ux.md`
+- `plans/completed/phase-3-comments-depth-and-performance.md`
 
 ## Goals
 - Improve day-to-day comment usability with minimal UI complexity.
