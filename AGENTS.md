@@ -17,6 +17,8 @@
 - `pnpm test:coverage`: run tests with V8 coverage report.
 - `pnpm start:firefox`: run extension in Firefox via `web-ext`.
 - `pnpm package`: build installable artifact from `dist/`.
+- `pnpm release:patch|minor|major`: run local release orchestration (preflight, version bump, commit/tag/push).
+- `pnpm release:fix-assets -- --tag <vX.Y.Z> --version <X.Y.Z>`: rebuild/package and upload missing release artifact to an existing GitHub release tag.
 
 ## Coding Style & Naming Conventions
 - Language: TypeScript (ES modules, strict mode).

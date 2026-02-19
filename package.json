@@ -15,7 +15,12 @@
     "package": "web-ext build --source-dir dist --overwrite-dest",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "docs:check": "node scripts/check-docs.mjs"
+    "docs:check": "node scripts/check-docs.mjs",
+    "release:preflight": "pnpm typecheck && pnpm test && pnpm build",
+    "release:patch": "node scripts/release.mjs patch",
+    "release:minor": "node scripts/release.mjs minor",
+    "release:major": "node scripts/release.mjs major",
+    "release:fix-assets": "node scripts/release-fix-assets.mjs"
   },
   "keywords": [],
   "author": "",

@@ -49,6 +49,22 @@ This repository uses in-repo documentation as the system of record.
 - `pnpm package`
   - Output: `web-ext-artifacts/*.zip` (can be renamed to `*.xpi`)
 
+## Release Automation
+
+- Preflight checks only:
+  - `pnpm release:preflight`
+- Create and publish a semver release tag (CI will build/package/release on GitHub):
+  - `pnpm release:patch`
+  - `pnpm release:minor`
+  - `pnpm release:major`
+- Backfill or replace a missing release asset on an existing tag:
+  - `pnpm release:fix-assets -- --tag v2.3.1 --version 2.3.1`
+
+Tag release flow:
+1. Local script validates clean `main`, runs preflight, bumps `package.json` + `manifest.json`, commits, tags, and pushes.
+2. GitHub Actions `release` workflow runs `typecheck`, `test`, `build`, `package`.
+3. CI publishes/updates GitHub release and uploads `web-ext-artifacts/reader_view_for_reddit-<version>.zip`.
+
 ## Source Code Submission (AMO reviewers)
 
 This repo uses a build step (TypeScript + bundling), so AMO requires submitting the unbuilt source code and reproducible build steps.
