@@ -46,6 +46,26 @@
                     <path d="M13 13h-2v-2h2v2zm0-4h-2V7h2v2z"></path>
                 </svg>
             </button>
+            <button id="download-post-md" class="btn btn--icon" title="Download Markdown" aria-label="Download post as Markdown" type="button">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    aria-hidden="true" focusable="false"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 3v12"></path>
+                    <path d="M7 10l5 5 5-5"></path>
+                    <path d="M5 21h14"></path>
+                </svg>
+            </button>
+            <button id="download-post-comments-md" class="btn btn--icon" title="Download + Comments" aria-label="Download post and comments as Markdown" type="button">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    aria-hidden="true" focusable="false"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 3v12"></path>
+                    <path d="M7 10l5 5 5-5"></path>
+                    <path d="M5 21h14"></path>
+                    <path d="M3 7h3"></path>
+                    <path d="M18 7h3"></path>
+                </svg>
+            </button>
             <div class="divider"></div>
             <button id="toggle-drawer" class="btn btn--icon" title="Comments & Settings" aria-label="Open settings" aria-haspopup="dialog" aria-expanded="false" aria-controls="settings-drawer" type="button">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -129,6 +149,16 @@
                     <option value="old">Old</option>
                     <option value="controversial">Controversial</option>
                 </select>
+            </div>
+            <input id="comments-search" class="drawer-select-sm" type="text" placeholder="Search comments or author:username" aria-label="Search comments">
+        </div>
+
+        <div class="drawer-section">
+            <label class="drawer-label">Thread View</label>
+            <div class="drawer-row-actions">
+                <button id="comments-expand-all" class="btn btn--outline btn--sm" type="button">Expand all</button>
+                <button id="comments-collapse-all" class="btn btn--outline btn--sm" type="button">Collapse all</button>
+                <button id="comments-reset-view" class="btn btn--outline btn--sm" type="button">Reset view</button>
             </div>
         </div>
 

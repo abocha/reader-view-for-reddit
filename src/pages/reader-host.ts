@@ -61,6 +61,8 @@ type RenderTreeSettings = {
     visibilityPlan: VisibilityPlan;
 };
 
+type CommentsBulkAction = 'expand_all' | 'collapse_all' | 'reset_view';
+
 let currentPost: RedditPostPayload | null = null;
 let currentComments: CommentNode[] = [];
 let commentsVisible = true;
@@ -113,6 +115,68 @@ function writeLocalStorageValue(key: string, value: string): void {
 function persistCommentsPreference(key: keyof typeof COMMENTS_PREF_KEYS, value: string): void {
     if (isBenchmark) return;
     writeLocalStorageValue(COMMENTS_PREF_KEYS[key], value);
+}
+
+function normalizeSearchToken(value: string): string {
+    return value.trim().toLowerCase();
+}
+
+function parseCommentSearchQuery(raw: string): { author: string | null; terms: string[] } {
+    const tokens = raw
+        .split(/\s+/)
+        .map(token => token.trim())
+        .filter(Boolean);
+
+    let author: string | null = null;
+    const terms: string[] = [];
+
+    for (const token of tokens) {
+        if (token.toLowerCase().startsWith('author:')) {
+            const candidate = normalizeSearchToken(token.slice('author:'.length).replace(/^u\//i, ''));
+            if (candidate) author = candidate;
+            continue;
+        }
+        terms.push(normalizeSearchToken(token));
+    }
+
+    return { author, terms };
+}
+
+function commentMatchesSearch(comment: CommentNode, query: { author: string | null; terms: string[] }): boolean {
+    const author = normalizeSearchToken(comment.author);
+    if (query.author && !author.includes(query.author)) return false;
+
+    if (query.terms.length === 0) return true;
+
+    const haystack = [
+        comment.author,
+        comment.bodyMarkdown,
+    ].join('\n').toLowerCase();
+
+    return query.terms.every(term => haystack.includes(term));
+}
+
+function filterCommentTree(comment: CommentNode, query: { author: string | null; terms: string[] }): CommentNode | null {
+    const filteredReplies: CommentNode[] = [];
+    for (const reply of comment.replies) {
+        const filtered = filterCommentTree(reply, query);
+        if (filtered) filteredReplies.push(filtered);
+    }
+
+    if (commentMatchesSearch(comment, query) || filteredReplies.length > 0) {
+        return { ...comment, replies: filteredReplies };
+    }
+    return null;
+}
+
+function filterCommentsBySearch(comments: CommentNode[], rawQuery: string): CommentNode[] {
+    const queryText = rawQuery.trim();
+    if (!queryText) return comments;
+
+    const query = parseCommentSearchQuery(queryText);
+    return comments
+        .map(comment => filterCommentTree(comment, query))
+        .filter((node): node is CommentNode => Boolean(node));
 }
 
 function coerceCommentsLimit(value: number | null | undefined): number {
@@ -669,9 +733,39 @@ export function initPreferences() {
     });
 }
 
+function slugifyFilename(value: string): string {
+    const slug = value
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    return slug || 'reddit-post';
+}
+
+function buildMarkdownFilename(post: RedditPostPayload, includeComments: boolean): string {
+    const stem = slugifyFilename(post.title || 'reddit-post').slice(0, 60);
+    const idPart = post.postId ? `-${post.postId}` : '';
+    const suffix = includeComments ? '-comments' : '';
+    return `${stem}${idPart}${suffix}.md`;
+}
+
+function downloadMarkdownFile(filename: string, text: string): void {
+    const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = filename;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+}
+
 export function initActions() {
     const copyPostBtn = document.getElementById('copy-post-md') as HTMLButtonElement | null;
     const copyPostCommentsBtn = document.getElementById('copy-post-comments-md') as HTMLButtonElement | null;
+    const downloadPostBtn = document.getElementById('download-post-md') as HTMLButtonElement | null;
+    const downloadPostCommentsBtn = document.getElementById('download-post-comments-md') as HTMLButtonElement | null;
     const openModeSelect = document.getElementById('open-mode') as HTMLSelectElement | null;
 
     // Drawer Logic
@@ -814,6 +908,39 @@ export function initActions() {
         }
     });
 
+    downloadPostBtn?.addEventListener('click', async () => {
+        if (!currentPost) return;
+        setBusy(downloadPostBtn, true);
+        try {
+            const markdown = buildPostMarkdown(currentPost);
+            const filename = buildMarkdownFilename(currentPost, false);
+            downloadMarkdownFile(filename, markdown);
+            showToast(`Downloaded ${filename}`, 'success');
+        } catch (e) {
+            console.warn('[Reader Host] Download failed', e);
+            showToast('Download failed.', 'error');
+        } finally {
+            setBusy(downloadPostBtn, false);
+        }
+    });
+
+    downloadPostCommentsBtn?.addEventListener('click', async () => {
+        if (!currentPost) return;
+        setBusy(downloadPostCommentsBtn, true);
+        try {
+            const limit = getCommentsLimit();
+            const markdown = buildPostAndCommentsMarkdown(currentPost, currentComments, limit);
+            const filename = buildMarkdownFilename(currentPost, true);
+            downloadMarkdownFile(filename, markdown);
+            showToast(`Downloaded ${filename}`, 'success');
+        } catch (e) {
+            console.warn('[Reader Host] Download failed', e);
+            showToast('Download failed.', 'error');
+        } finally {
+            setBusy(downloadPostCommentsBtn, false);
+        }
+    });
+
     // Depth Slider Live Update
     const depthInput = document.getElementById('comments-depth') as HTMLInputElement;
     const depthVal = document.getElementById('depth-val');
@@ -903,6 +1030,10 @@ export function initCommentsUI() {
     const smartModeEl = document.getElementById('comments-smart-mode') as HTMLInputElement | null;
     const limitEl = document.getElementById('comments-limit') as HTMLSelectElement | null;
     const sortEl = document.getElementById('comments-sort') as HTMLSelectElement | null;
+    const searchEl = document.getElementById('comments-search') as HTMLInputElement | null;
+    const expandAllBtn = document.getElementById('comments-expand-all') as HTMLButtonElement | null;
+    const collapseAllBtn = document.getElementById('comments-collapse-all') as HTMLButtonElement | null;
+    const resetViewBtn = document.getElementById('comments-reset-view') as HTMLButtonElement | null;
     const depthVal = document.getElementById('depth-val') as HTMLElement | null;
 
     if (!isBenchmark) {
@@ -975,6 +1106,21 @@ export function initCommentsUI() {
     sortEl?.addEventListener('change', onFetchConfigChange);
     depthEl?.addEventListener('change', onViewConfigChange);
     smartModeEl?.addEventListener('change', onViewConfigChange);
+    searchEl?.addEventListener('input', () => {
+        if (!commentsVisible) return;
+        rerenderComments();
+    });
+
+    const bindBulkAction = (button: HTMLButtonElement | null, action: CommentsBulkAction) => {
+        button?.addEventListener('click', () => {
+            applyCommentsBulkAction(action, currentComments);
+            if (!commentsVisible) return;
+            rerenderComments();
+        });
+    };
+    bindBulkAction(expandAllBtn, 'expand_all');
+    bindBulkAction(collapseAllBtn, 'collapse_all');
+    bindBulkAction(resetViewBtn, 'reset_view');
 
     // Initialize state
     if (toggleSwitch) {
@@ -1705,6 +1851,59 @@ function getCommentsSort(): string {
     return sortEl?.value || 'best';
 }
 
+function getCommentsSearchQuery(): string {
+    const searchEl = document.getElementById('comments-search') as HTMLInputElement | null;
+    return (searchEl?.value || '').trim();
+}
+
+function collectCommentIds(comments: CommentNode[]): {
+    allIds: Set<string>;
+    expandableIds: Set<string>;
+    autoModeratorIds: Set<string>;
+} {
+    const allIds = new Set<string>();
+    const expandableIds = new Set<string>();
+    const autoModeratorIds = new Set<string>();
+
+    const walk = (node: CommentNode) => {
+        allIds.add(node.id);
+        if (node.replies.length > 0) expandableIds.add(node.id);
+        if (node.author.trim().toLowerCase() === 'automoderator') autoModeratorIds.add(node.id);
+        for (const reply of node.replies) walk(reply);
+    };
+
+    for (const comment of comments) walk(comment);
+    return { allIds, expandableIds, autoModeratorIds };
+}
+
+function applyCommentsBulkAction(action: CommentsBulkAction, comments: CommentNode[]): void {
+    if (action === 'reset_view') {
+        collapsedById.clear();
+        expandedMoreById.clear();
+        expandedLowScoreById.clear();
+        autoModeratorExpandedById.clear();
+        return;
+    }
+
+    const ids = collectCommentIds(comments);
+    if (action === 'collapse_all') {
+        collapsedById.clear();
+        for (const id of ids.allIds) collapsedById.add(id);
+        expandedMoreById.clear();
+        expandedLowScoreById.clear();
+        autoModeratorExpandedById.clear();
+        return;
+    }
+
+    collapsedById.clear();
+    expandedMoreById.clear();
+    expandedLowScoreById.clear();
+    autoModeratorExpandedById.clear();
+    for (const id of ids.allIds) expandedLowScoreById.add(id);
+    for (const id of ids.expandableIds) expandedMoreById.add(id);
+    for (const id of ids.autoModeratorIds) autoModeratorExpandedById.add(id);
+}
+
 function buildCommentsJsonUrl(
     permalink: string,
     options: { limit: number; sort: string },
@@ -1800,6 +1999,17 @@ function rerenderComments() {
     captureCommentFocus();
     listEl.replaceChildren();
 
+    const searchQuery = getCommentsSearchQuery();
+    const filteredRoots = filterCommentsBySearch(currentComments, searchQuery);
+    if (searchQuery && filteredRoots.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'comment-collapsed';
+        empty.textContent = `No comments match "${searchQuery}".`;
+        listEl.appendChild(empty);
+        restoreCommentFocus();
+        return;
+    }
+
     const depth = getCommentsDepth();
     const smartMode = getSmartCommentsMode();
     const policy: VisibilityPolicy = {
@@ -1812,7 +2022,7 @@ function rerenderComments() {
         expandedLowScoreIds: expandedLowScoreById,
     };
 
-    for (const top of currentComments) {
+    for (const top of filteredRoots) {
         const visibilityPlan = buildVisibilityPlan(top, policy, viewState);
         listEl.appendChild(renderCommentTree(top, { depthLimit: depth, visibilityPlan }, 0, false));
     }
@@ -2755,14 +2965,19 @@ function showToast(message: string, tone: 'info' | 'success' | 'error' = 'info')
 }
 
 export const __test__ = {
+    applyCommentsBulkAction,
     buildCommentSnippet,
+    buildMarkdownFilename,
     buildPostAndCommentsMarkdown,
+    filterCommentsBySearch,
     init,
     initTokenProtocol,
     isProbablyImageUrl,
     isGiphyGifPage,
     createImagePreview,
     collapsedById,
+    expandedLowScoreById,
+    expandedMoreById,
 };
 
 document.addEventListener('DOMContentLoaded', init);
