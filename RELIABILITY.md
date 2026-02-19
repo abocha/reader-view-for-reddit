@@ -31,6 +31,9 @@
 - Retry after comments fetch `500`.
 - Pending token timeout and cleanup behavior.
 - Cache hit/miss + eviction paths.
+- Smart curation ON/OFF parity on same tree (deterministic plan output for fixed input).
+- Deep expansion cap (`maxExtraDeepVisiblePerRoot`) respected under high-branch threads.
+- Negative-with-signal guard works (strong descendant branches are not auto-hidden).
 - Markdown export tree consistency: node `id`/`p`/`x`/`d` align with visible comment order and depth filtering.
 
 ## Known Limits

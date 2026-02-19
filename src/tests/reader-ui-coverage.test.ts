@@ -28,8 +28,7 @@ import browser from 'webextension-polyfill';
                 </select>
                 <input id="comments-depth" type="range" value="5" />
                 <span id="depth-val"></span>
-                <input id="comments-auto-depth" type="checkbox" checked />
-                <input id="comments-hide-low" type="checkbox" />
+                <input id="comments-smart-mode" type="checkbox" checked />
                 <select id="comments-limit"><option value="100" selected>100</option></select>
                 <select id="comments-sort">
                     <option value="best" selected>Best</option>

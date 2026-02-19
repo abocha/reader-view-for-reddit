@@ -7,6 +7,7 @@ import {
     parseComment,
     renderArticle,
     buildPostMarkdown,
+    buildVisibilityPlan,
     computePromotedPathIds,
     renderCommentTree,
     __test__
@@ -272,8 +273,7 @@ describe('Reader Host Logic', () => {
         it('should export comments with ascii tree markers and explicit structural fields', () => {
             document.body.innerHTML = `
                 <input id="comments-depth" value="5" />
-                <input id="comments-auto-depth" type="checkbox" />
-                <input id="comments-hide-low" type="checkbox" />
+                <input id="comments-smart-mode" type="checkbox" />
             `;
             __test__.collapsedById.clear();
 
@@ -328,6 +328,7 @@ describe('Reader Host Logic', () => {
             expect(md).toContain('- root_comments: 2');
             expect(md).toMatch(/- exported_at_utc: \d{10}/);
             expect(md).toContain('field_legend: node(id,p,x,d,a,s,t)');
+            expect(md).toContain('smart_comments: false');
             expect(md).toContain('|-- [node id=c1 p=null x=1 d=0 a=a s=10]');
             expect(md).toContain('|   |-- [node id=c2 p=c1 x=1.1 d=1 a=b s=7]');
             expect(md).toContain('|   `-- [node id=c3 p=c1 x=1.2 d=1 a=c s=4]');
@@ -394,27 +395,39 @@ describe('Reader Host Logic', () => {
 
     describe('renderCommentTree actions', () => {
         it('should wire up "show more" and low-score reveal buttons', () => {
+            const root = {
+                id: 'p',
+                author: 'parent',
+                bodyMarkdown: 'p',
+                bodyHtml: '<p>p</p>',
+                replies: [
+                    { id: 'low', author: 'low', bodyMarkdown: 'low', bodyHtml: '<p>low</p>', score: -13, replies: [] },
+                    {
+                        id: 'deep',
+                        author: 'deep',
+                        bodyMarkdown: 'deep',
+                        bodyHtml: '<p>deep</p>',
+                        score: 1,
+                        replies: [
+                            { id: 'child', author: 'child', bodyMarkdown: 'child', bodyHtml: '<p>child</p>', score: 8, replies: [] },
+                            { id: 'child-2', author: 'child2', bodyMarkdown: 'child2', bodyHtml: '<p>child2</p>', score: -2, replies: [] },
+                        ],
+                    },
+                ],
+            } as any;
+            const visibilityPlan = buildVisibilityPlan(root, {
+                depthLimit: 1,
+                smartMode: true,
+                utilityThreshold: 0.75,
+                siblingCloseDelta: 0.6,
+                maxExtraDeepVisiblePerRoot: 12,
+            }, {
+                expandedMoreIds: new Set<string>(),
+                expandedLowScoreIds: new Set<string>(),
+            });
             const wrapper = renderCommentTree(
-                {
-                    id: 'p',
-                    author: 'parent',
-                    bodyMarkdown: 'p',
-                    bodyHtml: '<p>p</p>',
-                    replies: [
-                        { id: 'low', author: 'low', bodyMarkdown: 'low', bodyHtml: '<p>low</p>', score: -10, replies: [] },
-                        {
-                            id: 'deep',
-                            author: 'deep',
-                            bodyMarkdown: 'deep',
-                            bodyHtml: '<p>deep</p>',
-                            score: 1,
-                            replies: [
-                                { id: 'child', author: 'child', bodyMarkdown: 'child', bodyHtml: '<p>child</p>', score: 1, replies: [] },
-                            ],
-                        },
-                    ],
-                } as any,
-                { depthLimit: 1, autoDepth: false, hideLow: true, promotedPathIds: new Set() },
+                root,
+                { depthLimit: 1, visibilityPlan },
                 0,
                 false,
             );
@@ -444,7 +457,25 @@ describe('Reader Host Logic', () => {
                     bodyHtml: '<p>Hello world</p>',
                     replies: [],
                 } as any,
-                { depthLimit: 5, autoDepth: false, hideLow: false, promotedPathIds: new Set() },
+                {
+                    depthLimit: 5,
+                    visibilityPlan: buildVisibilityPlan({
+                        id: 'c1',
+                        author: 'user',
+                        bodyMarkdown: 'Hello world',
+                        bodyHtml: '<p>Hello world</p>',
+                        replies: [],
+                    } as any, {
+                        depthLimit: 5,
+                        smartMode: false,
+                        utilityThreshold: 0.75,
+                        siblingCloseDelta: 0.6,
+                        maxExtraDeepVisiblePerRoot: 12,
+                    }, {
+                        expandedMoreIds: new Set<string>(),
+                        expandedLowScoreIds: new Set<string>(),
+                    }),
+                },
                 0,
                 false,
             );
@@ -465,7 +496,25 @@ describe('Reader Host Logic', () => {
                     bodyHtml: '<p>Please keep it civil.</p>',
                     replies: [],
                 } as any,
-                { depthLimit: 5, autoDepth: false, hideLow: false, promotedPathIds: new Set() },
+                {
+                    depthLimit: 5,
+                    visibilityPlan: buildVisibilityPlan({
+                        id: 'c-auto',
+                        author: 'AutoModerator',
+                        bodyMarkdown: 'Please keep it civil.',
+                        bodyHtml: '<p>Please keep it civil.</p>',
+                        replies: [],
+                    } as any, {
+                        depthLimit: 5,
+                        smartMode: false,
+                        utilityThreshold: 0.75,
+                        siblingCloseDelta: 0.6,
+                        maxExtraDeepVisiblePerRoot: 12,
+                    }, {
+                        expandedMoreIds: new Set<string>(),
+                        expandedLowScoreIds: new Set<string>(),
+                    }),
+                },
                 0,
                 false,
             );
@@ -488,7 +537,25 @@ describe('Reader Host Logic', () => {
                     bodyHtml: '<p>Hello</p>',
                     replies: [],
                 } as any,
-                { depthLimit: 5, autoDepth: false, hideLow: false, promotedPathIds: new Set() },
+                {
+                    depthLimit: 5,
+                    visibilityPlan: buildVisibilityPlan({
+                        id: 'c2',
+                        author: 'user',
+                        bodyMarkdown: 'Hello',
+                        bodyHtml: '<p>Hello</p>',
+                        replies: [],
+                    } as any, {
+                        depthLimit: 5,
+                        smartMode: false,
+                        utilityThreshold: 0.75,
+                        siblingCloseDelta: 0.6,
+                        maxExtraDeepVisiblePerRoot: 12,
+                    }, {
+                        expandedMoreIds: new Set<string>(),
+                        expandedLowScoreIds: new Set<string>(),
+                    }),
+                },
                 0,
                 false,
             );

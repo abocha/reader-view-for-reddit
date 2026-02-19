@@ -105,18 +105,14 @@
             <label class="drawer-label" for="comments-depth">Depth: <span id="depth-val">1</span></label>
             <input type="range" id="comments-depth" min="0" max="5" value="1" class="drawer-slider" aria-describedby="depth-val">
             <div class="drawer-checkbox">
-                <input id="comments-auto-depth" type="checkbox" checked />
-                <label for="comments-auto-depth"
-                    title="Automatically expand deep threads if they have a high score">Auto-Expand Best</label>
+                <input id="comments-smart-mode" type="checkbox" checked />
+                <label for="comments-smart-mode"
+                    title="Smart mode expands valuable deep branches and collapses low-value noise">Smart thread curation</label>
             </div>
         </div>
 
         <div class="drawer-section">
             <label class="drawer-label">Filter</label>
-            <div class="drawer-checkbox">
-                <input id="comments-hide-low" type="checkbox" checked />
-                <label for="comments-hide-low">Hide Low Score</label>
-            </div>
             <div class="drawer-row-inputs">
                 <select id="comments-limit" class="drawer-select-sm" aria-label="Comments limit">
                     <option value="50">50</option>

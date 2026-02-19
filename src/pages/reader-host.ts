@@ -15,6 +15,48 @@ type CommentNode = {
     replies: CommentNode[];
 };
 
+type NodeStats = {
+    id: string;
+    parentId: string | null;
+    depth: number;
+    score: number;
+    childCount: number;
+    bestDescendantScore: number;
+    positiveDescendantCount: number;
+    subtreeSize: number;
+};
+
+type ScoredChild = {
+    id: string;
+    utility: number;
+    isHardLow: boolean;
+    reasonFlags: string[];
+};
+
+type VisibilityPlan = {
+    visibleChildrenByParentId: Map<string, string[]>;
+    collapsedLowByParentId: Map<string, string[]>;
+    hiddenDepthCountByParentId: Map<string, number>;
+};
+
+type VisibilityPolicy = {
+    depthLimit: number;
+    smartMode: boolean;
+    utilityThreshold: number;
+    siblingCloseDelta: number;
+    maxExtraDeepVisiblePerRoot: number;
+};
+
+type VisibilityViewState = {
+    expandedMoreIds: Set<string>;
+    expandedLowScoreIds: Set<string>;
+};
+
+type RenderTreeSettings = {
+    depthLimit: number;
+    visibilityPlan: VisibilityPlan;
+};
+
 let currentPost: RedditPostPayload | null = null;
 let currentComments: CommentNode[] = [];
 let commentsVisible = true;
@@ -34,6 +76,11 @@ let pendingCommentFocusId: string | null = null;
 let currentCommentsHasMore = false;
 
 const COMMENTS_LIMIT_OPTIONS = [50, 100, 200, 300, 400, 500] as const;
+const DEFAULT_VISIBILITY_POLICY: Omit<VisibilityPolicy, 'depthLimit' | 'smartMode'> = {
+    utilityThreshold: 0.75,
+    siblingCloseDelta: 0.6,
+    maxExtraDeepVisiblePerRoot: 12,
+};
 
 function coerceCommentsLimit(value: number | null | undefined): number {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 100;
@@ -734,19 +781,13 @@ export function initActions() {
         }
     });
 
-    // Depth Slider Live Update & Auto-Disable
+    // Depth Slider Live Update
     const depthInput = document.getElementById('comments-depth') as HTMLInputElement;
     const depthVal = document.getElementById('depth-val');
-    const autoDepthCheckbox = document.getElementById('comments-auto-depth') as HTMLInputElement;
 
     if (depthInput && depthVal) {
         depthInput.addEventListener('input', () => {
             depthVal.textContent = depthInput.value;
-            if (autoDepthCheckbox && autoDepthCheckbox.checked) {
-                autoDepthCheckbox.checked = false;
-                // Don't need to trigger change immediately as the slider input/change event will likely handle rerender eventually, 
-                // or we can manually trigger it if desired. The main point is visually unchecking it.
-            }
         });
     }
 
@@ -825,8 +866,7 @@ export function initCommentsUI() {
     const toggleSwitch = document.getElementById('toggle-comments-switch') as HTMLInputElement | null;
     // Reload logic merged into config changes
     const depthEl = document.getElementById('comments-depth') as HTMLInputElement | null;
-    const autoDepthEl = document.getElementById('comments-auto-depth') as HTMLInputElement | null;
-    const hideLowEl = document.getElementById('comments-hide-low') as HTMLInputElement | null;
+    const smartModeEl = document.getElementById('comments-smart-mode') as HTMLInputElement | null;
     const limitEl = document.getElementById('comments-limit') as HTMLSelectElement | null;
     const sortEl = document.getElementById('comments-sort') as HTMLSelectElement | null;
 
@@ -855,8 +895,7 @@ export function initCommentsUI() {
     limitEl?.addEventListener('change', onFetchConfigChange);
     sortEl?.addEventListener('change', onFetchConfigChange);
     depthEl?.addEventListener('change', onViewConfigChange);
-    autoDepthEl?.addEventListener('change', onViewConfigChange);
-    hideLowEl?.addEventListener('change', onViewConfigChange);
+    smartModeEl?.addEventListener('change', onViewConfigChange);
 
     // Initialize state
     if (toggleSwitch) {
@@ -1479,13 +1518,8 @@ function getCommentsDepth(): number {
     return Math.min(5, Math.max(0, parsed));
 }
 
-export function getAutoDepth(): boolean {
-    const el = document.getElementById('comments-auto-depth') as HTMLInputElement | null;
-    return el?.checked ?? true;
-}
-
-function getHideLowScore(): boolean {
-    const el = document.getElementById('comments-hide-low') as HTMLInputElement | null;
+function getSmartCommentsMode(): boolean {
+    const el = document.getElementById('comments-smart-mode') as HTMLInputElement | null;
     return el?.checked ?? true;
 }
 
@@ -1596,22 +1630,49 @@ function rerenderComments() {
     listEl.replaceChildren();
 
     const depth = getCommentsDepth();
-    const autoDepth = getAutoDepth();
-    const hideLow = getHideLowScore();
+    const smartMode = getSmartCommentsMode();
+    const policy: VisibilityPolicy = {
+        depthLimit: depth,
+        smartMode,
+        ...DEFAULT_VISIBILITY_POLICY,
+    };
+    const viewState: VisibilityViewState = {
+        expandedMoreIds: expandedMoreById,
+        expandedLowScoreIds: expandedLowScoreById,
+    };
 
     for (const top of currentComments) {
-        const topScore = typeof top.score === 'number' ? top.score : 0;
-        const promoted = autoDepth ? computePromotedPathIds(top, depth, topScore) : new Set<string>();
-        listEl.appendChild(renderCommentTree(top, { depthLimit: depth, autoDepth, hideLow, promotedPathIds: promoted }, 0, false));
+        const visibilityPlan = buildVisibilityPlan(top, policy, viewState);
+        listEl.appendChild(renderCommentTree(top, { depthLimit: depth, visibilityPlan }, 0, false));
     }
 
     restoreCommentFocus();
     scheduleEnhance(listEl);
 }
 
+function getVisibleChildrenFromPlan(comment: CommentNode, plan: VisibilityPlan): {
+    visible: CommentNode[];
+    lowScoreCollapsed: CommentNode[];
+    hiddenDepthCount: number;
+} {
+    const byId = new Map(comment.replies.map(reply => [reply.id, reply] as const));
+    const visibleIds = plan.visibleChildrenByParentId.get(comment.id) ?? [];
+    const collapsedIds = plan.collapsedLowByParentId.get(comment.id) ?? [];
+    const hiddenDepthCount = plan.hiddenDepthCountByParentId.get(comment.id) ?? 0;
+
+    const visible = visibleIds
+        .map(id => byId.get(id))
+        .filter((node): node is CommentNode => Boolean(node));
+    const lowScoreCollapsed = collapsedIds
+        .map(id => byId.get(id))
+        .filter((node): node is CommentNode => Boolean(node));
+
+    return { visible, lowScoreCollapsed, hiddenDepthCount };
+}
+
 export function renderCommentTree(
     comment: CommentNode,
-    settings: { depthLimit: number; autoDepth: boolean; hideLow: boolean; promotedPathIds: Set<string> },
+    settings: RenderTreeSettings,
     currentDepth: number,
     unlimitedDepth: boolean,
     options?: { forceCollapsed?: boolean; lowScore?: boolean },
@@ -1691,14 +1752,9 @@ export function renderCommentTree(
     repliesEl.className = 'comment-replies';
 
     const thisSubtreeUnlimited = unlimitedDepth || expandedMoreById.has(comment.id);
-    const { visible, lowScoreCollapsed, hiddenDepthCount } = selectVisibleChildren(
+    const { visible, lowScoreCollapsed, hiddenDepthCount } = getVisibleChildrenFromPlan(
         comment,
-        comment.replies,
-        currentDepth + 1,
-        settings.depthLimit,
-        settings.hideLow,
-        settings.promotedPathIds,
-        thisSubtreeUnlimited,
+        settings.visibilityPlan,
     );
 
     for (const child of visible) {
@@ -1849,87 +1905,249 @@ function buildCommentSnippet(comment: CommentNode): string {
 }
 
 export function computePromotedPathIds(root: CommentNode, depthLimit: number, _topScore: number): Set<string> {
-    const parentById = new Map<string, string | null>();
-    const scoreById = new Map<string, number>();
-    const depthById = new Map<string, number>();
-    const allIds: string[] = [];
-
-    const visit = (node: CommentNode, parentId: string | null, depth: number) => {
-        parentById.set(node.id, parentId);
-        scoreById.set(node.id, typeof node.score === 'number' ? node.score : 0);
-        depthById.set(node.id, depth);
-        allIds.push(node.id);
-        for (const child of node.replies) visit(child, node.id, depth + 1);
+    const stats = collectNodeStats(root);
+    const policy: VisibilityPolicy = {
+        depthLimit,
+        smartMode: true,
+        ...DEFAULT_VISIBILITY_POLICY,
     };
-
-    visit(root, null, 0);
-
-    const candidates: Array<{ id: string; score: number }> = [];
-    let maxCandidateScore = 0;
-
-    for (const id of allIds) {
-        const depth = depthById.get(id) ?? 0;
-        if (depth <= depthLimit) continue;
-        const score = scoreById.get(id) ?? 0;
-        candidates.push({ id, score });
-        if (score > maxCandidateScore) maxCandidateScore = score;
-    }
-
-    // If nothing beyond the depth limit is meaningfully upvoted, don't expand.
-    if (maxCandidateScore < 5) return new Set<string>();
-
-    const threshold = Math.max(5, maxCandidateScore * 0.25);
-    const best = candidates
-        .filter(c => c.score >= threshold)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 3);
-
+    const plan = buildVisibilityPlan(root, policy, {
+        expandedMoreIds: new Set<string>(),
+        expandedLowScoreIds: new Set<string>(),
+    });
     const promoted = new Set<string>();
-    for (const { id } of best) {
-        let cur: string | null = id;
-        while (cur) {
-            promoted.add(cur);
-            cur = parentById.get(cur) ?? null;
+    const walk = (node: CommentNode) => {
+        const visibleIds = plan.visibleChildrenByParentId.get(node.id) ?? [];
+        for (const childId of visibleIds) {
+            const child = node.replies.find(reply => reply.id === childId);
+            if (!child) continue;
+            const childStats = stats.get(child.id);
+            if (childStats && childStats.depth > depthLimit) {
+                let cur: string | null = child.id;
+                while (cur) {
+                    promoted.add(cur);
+                    cur = stats.get(cur)?.parentId ?? null;
+                }
+            }
+            walk(child);
         }
-    }
-
+    };
+    walk(root);
     return promoted;
 }
 
-function selectVisibleChildren(
-    parent: CommentNode,
+export function collectNodeStats(root: CommentNode): Map<string, NodeStats> {
+    const stats = new Map<string, NodeStats>();
+
+    const visit = (node: CommentNode, parentId: string | null, depth: number): NodeStats => {
+        const score = typeof node.score === 'number' ? node.score : 0;
+        let bestDescendantScore = Number.NEGATIVE_INFINITY;
+        let positiveDescendantCount = 0;
+        let subtreeSize = 1;
+
+        for (const child of node.replies) {
+            const childStats = visit(child, node.id || null, depth + 1);
+            subtreeSize += childStats.subtreeSize;
+            bestDescendantScore = Math.max(bestDescendantScore, childStats.score, childStats.bestDescendantScore);
+            positiveDescendantCount += (childStats.score > 0 ? 1 : 0) + childStats.positiveDescendantCount;
+        }
+
+        const nodeStats: NodeStats = {
+            id: node.id,
+            parentId,
+            depth,
+            score,
+            childCount: node.replies.length,
+            bestDescendantScore,
+            positiveDescendantCount,
+            subtreeSize,
+        };
+        stats.set(node.id, nodeStats);
+        return nodeStats;
+    };
+
+    visit(root, null, 0);
+    return stats;
+}
+
+export function scoreSiblingGroup(
     children: CommentNode[],
-    depth: number,
-    depthLimit: number,
-    hideLow: boolean,
-    promotedPathIds: Set<string>,
-    unlimitedDepth: boolean,
-): { visible: CommentNode[]; lowScoreCollapsed: CommentNode[]; hiddenDepthCount: number } {
-    const visible: CommentNode[] = [];
-    const lowScoreCollapsed: CommentNode[] = [];
-    let hiddenDepthCount = 0;
+    context: { stats: Map<string, NodeStats>; depthLimit: number },
+): ScoredChild[] {
+    if (children.length === 0) return [];
 
-    for (const child of children) {
-        const score = typeof child.score === 'number' ? child.score : 0;
-        const isLow = hideLow && score <= -3 && !expandedLowScoreById.has(child.id);
+    const ranked = [...children].sort((a, b) => {
+        const aScore = context.stats.get(a.id)?.score ?? 0;
+        const bScore = context.stats.get(b.id)?.score ?? 0;
+        if (bScore !== aScore) return bScore - aScore;
+        return a.id.localeCompare(b.id);
+    });
 
-        const withinDepth = depth <= depthLimit;
-        const promoted = promotedPathIds.has(child.id);
-        const visibleByDepth = unlimitedDepth || withinDepth || promoted;
-
-        if (!visibleByDepth) {
-            hiddenDepthCount += 1;
-            continue;
-        }
-
-        if (isLow) {
-            lowScoreCollapsed.push(child);
-        } else {
-            visible.push(child);
-        }
+    const percentileById = new Map<string, number>();
+    for (let i = 0; i < ranked.length; i += 1) {
+        const percentile = ranked.length <= 1 ? 0 : i / (ranked.length - 1);
+        percentileById.set(ranked[i]!.id, percentile);
     }
 
-    return { visible, lowScoreCollapsed, hiddenDepthCount };
+    return children.map((child) => {
+        const stat = context.stats.get(child.id);
+        const score = stat?.score ?? 0;
+        const childDepth = stat?.depth ?? 0;
+        const bestDescendantScore = Number.isFinite(stat?.bestDescendantScore)
+            ? (stat?.bestDescendantScore ?? Number.NEGATIVE_INFINITY)
+            : Number.NEGATIVE_INFINITY;
+        const positiveDescendantCount = stat?.positiveDescendantCount ?? 0;
+        const siblingPercentile = percentileById.get(child.id) ?? 0;
+
+        const ownScore = Math.log1p(Math.max(score, 0)) * 1.0;
+        const negPenalty = score < 0 ? Math.min(2.0, Math.abs(score) / 8) : 0;
+        const rankBonus = (1 - siblingPercentile) * 0.8;
+        const descendantBoost = Math.log1p(Math.max(bestDescendantScore, 0)) * 0.45 + Math.min(positiveDescendantCount, 8) * 0.08;
+        const depthPenalty = Math.max(0, childDepth - context.depthLimit) * 0.55;
+        const utility = ownScore + rankBonus + descendantBoost - negPenalty - depthPenalty;
+
+        const isHardLow = score <= -12 && bestDescendantScore < 8;
+        const reasonFlags: string[] = [];
+        if (score < 0) reasonFlags.push('negative');
+        if (isHardLow) reasonFlags.push('hard_low');
+        if (bestDescendantScore >= 15 || positiveDescendantCount >= 3) reasonFlags.push('strong_descendant');
+        if (childDepth > context.depthLimit) reasonFlags.push('deep');
+
+        return { id: child.id, utility, isHardLow, reasonFlags };
+    });
+}
+
+export function buildVisibilityPlan(
+    root: CommentNode,
+    policy: VisibilityPolicy,
+    viewState: VisibilityViewState,
+): VisibilityPlan {
+    const stats = collectNodeStats(root);
+    const visibleChildrenByParentId = new Map<string, string[]>();
+    const collapsedLowByParentId = new Map<string, string[]>();
+    const hiddenDepthCountByParentId = new Map<string, number>();
+    let extraDeepVisibleCount = 0;
+
+    const walk = (parent: CommentNode, inheritedUnlimitedDepth: boolean) => {
+        if (parent.replies.length === 0) return;
+
+        const thisSubtreeUnlimited = inheritedUnlimitedDepth || viewState.expandedMoreIds.has(parent.id);
+        const scoredChildren = scoreSiblingGroup(parent.replies, { stats, depthLimit: policy.depthLimit });
+        const scoredById = new Map(scoredChildren.map(entry => [entry.id, entry] as const));
+
+        const visibleIds: string[] = [];
+        const collapsedIds: string[] = [];
+        const hiddenDepthIds: string[] = [];
+        const deepCandidates: ScoredChild[] = [];
+        const forcedDeepVisible = new Set<string>();
+
+        for (const child of parent.replies) {
+            const stat = stats.get(child.id);
+            const score = stat?.score ?? 0;
+            const childDepth = stat?.depth ?? 0;
+            const bestDescendantScore = Number.isFinite(stat?.bestDescendantScore)
+                ? (stat?.bestDescendantScore ?? Number.NEGATIVE_INFINITY)
+                : Number.NEGATIVE_INFINITY;
+            const positiveDescendantCount = stat?.positiveDescendantCount ?? 0;
+            const strongDescendantSignal = bestDescendantScore >= 15 || positiveDescendantCount >= 3;
+            const scored = scoredById.get(child.id);
+            const isHardLow = policy.smartMode ? (scored?.isHardLow ?? false) : false;
+
+            const withinDepth = thisSubtreeUnlimited || childDepth <= policy.depthLimit;
+            if (withinDepth) {
+                const userExpandedLow = viewState.expandedLowScoreIds.has(child.id);
+                if (policy.smartMode && isHardLow && !strongDescendantSignal && !userExpandedLow) {
+                    collapsedIds.push(child.id);
+                } else {
+                    visibleIds.push(child.id);
+                }
+                continue;
+            }
+
+            if (!policy.smartMode) {
+                hiddenDepthIds.push(child.id);
+                continue;
+            }
+
+            if (score < 0 && strongDescendantSignal) {
+                forcedDeepVisible.add(child.id);
+                continue;
+            }
+
+            if (scored) deepCandidates.push(scored);
+            else hiddenDepthIds.push(child.id);
+        }
+
+        if (policy.smartMode && !thisSubtreeUnlimited && deepCandidates.length > 0) {
+            const sorted = [...deepCandidates].sort((a, b) => {
+                if (b.utility !== a.utility) return b.utility - a.utility;
+                const scoreA = stats.get(a.id)?.score ?? 0;
+                const scoreB = stats.get(b.id)?.score ?? 0;
+                if (scoreB !== scoreA) return scoreB - scoreA;
+                return a.id.localeCompare(b.id);
+            });
+
+            let budget = 1;
+            if (sorted.length >= 2) {
+                const first = sorted[0]!;
+                const second = sorted[1]!;
+                const delta = first.utility - second.utility;
+                if (
+                    delta <= policy.siblingCloseDelta &&
+                    first.utility >= policy.utilityThreshold &&
+                    second.utility >= policy.utilityThreshold
+                ) {
+                    budget = 2;
+                }
+            }
+
+            extraDeepVisibleCount += forcedDeepVisible.size;
+            const remainingCap = Math.max(0, policy.maxExtraDeepVisiblePerRoot - extraDeepVisibleCount);
+            const take = Math.min(budget, remainingCap);
+            const selectedDeep = new Set<string>(sorted.slice(0, take).map(item => item.id));
+            extraDeepVisibleCount += selectedDeep.size;
+
+            for (const child of parent.replies) {
+                const isDeep = (stats.get(child.id)?.depth ?? 0) > policy.depthLimit;
+                if (!isDeep) continue;
+                if (forcedDeepVisible.has(child.id) || selectedDeep.has(child.id)) {
+                    visibleIds.push(child.id);
+                } else if (!hiddenDepthIds.includes(child.id)) {
+                    hiddenDepthIds.push(child.id);
+                }
+            }
+        } else {
+            for (const child of parent.replies) {
+                const isDeep = (stats.get(child.id)?.depth ?? 0) > policy.depthLimit;
+                if (!isDeep) continue;
+                if (forcedDeepVisible.has(child.id)) {
+                    visibleIds.push(child.id);
+                } else if (!hiddenDepthIds.includes(child.id)) {
+                    hiddenDepthIds.push(child.id);
+                }
+            }
+        }
+
+        visibleChildrenByParentId.set(parent.id, visibleIds);
+        collapsedLowByParentId.set(parent.id, collapsedIds);
+        hiddenDepthCountByParentId.set(parent.id, hiddenDepthIds.length);
+
+        // Only recurse into currently reachable branches. Hidden or force-collapsed
+        // branches should not consume global deep-expansion budget.
+        const childById = new Map(parent.replies.map(child => [child.id, child] as const));
+        for (const childId of visibleIds) {
+            const child = childById.get(childId);
+            if (!child) continue;
+            walk(child, thisSubtreeUnlimited);
+        }
+    };
+
+    walk(root, false);
+    return {
+        visibleChildrenByParentId,
+        collapsedLowByParentId,
+        hiddenDepthCountByParentId,
+    };
 }
 
 type CommentExportTreeContext = {
@@ -1985,8 +2203,7 @@ function buildPostAndCommentsMarkdown(
     parts.push(buildPostMarkdown(post));
     parts.push('');
     const depth = getCommentsDepth();
-    const autoDepth = getAutoDepth();
-    const hideLow = getHideLowScore();
+    const smartMode = getSmartCommentsMode();
     const exportedAtUtc = Math.floor(Date.now() / 1000);
 
     parts.push('## Comment Export Settings');
@@ -1994,8 +2211,9 @@ function buildPostAndCommentsMarkdown(
     parts.push(`- exported_at_utc: ${exportedAtUtc}`);
     parts.push('- field_legend: node(id,p,x,d,a,s,t)');
     parts.push(`- depth_setting: ${depth}`);
-    parts.push(`- auto_depth: ${autoDepth ? 'true' : 'false'}`);
-    parts.push(`- hide_low_score: ${hideLow ? 'true' : 'false'}`);
+    parts.push(`- smart_comments: ${smartMode ? 'true' : 'false'}`);
+    parts.push(`- auto_depth: ${smartMode ? 'true' : 'false'}`);
+    parts.push(`- hide_low_score: ${smartMode ? 'true' : 'false'}`);
     parts.push('');
     parts.push('## Comments');
     parts.push('');
@@ -2011,13 +2229,20 @@ function buildPostAndCommentsMarkdown(
     const visibleRoots = comments.filter(comment => !collapsedById.has(comment.id));
     for (let i = 0; i < visibleRoots.length; i += 1) {
         const comment = visibleRoots[i]!;
-        const topScore = typeof comment.score === 'number' ? comment.score : 0;
-        const promoted = autoDepth ? computePromotedPathIds(comment, depth, topScore) : new Set<string>();
+        const policy: VisibilityPolicy = {
+            depthLimit: depth,
+            smartMode,
+            ...DEFAULT_VISIBILITY_POLICY,
+        };
+        const visibilityPlan = buildVisibilityPlan(comment, policy, {
+            expandedMoreIds: expandedMoreById,
+            expandedLowScoreIds: expandedLowScoreById,
+        });
         appendVisibleCommentMarkdown(
             parts,
             comment,
             0,
-            { depthLimit: depth, autoDepth, hideLow, promotedPathIds: promoted },
+            { depthLimit: depth, visibilityPlan },
             false,
             {
                 parentId: null,
@@ -2036,7 +2261,7 @@ function appendVisibleCommentMarkdown(
     out: string[],
     comment: CommentNode,
     depth: number,
-    settings: { depthLimit: number; autoDepth: boolean; hideLow: boolean; promotedPathIds: Set<string> },
+    settings: RenderTreeSettings,
     unlimitedDepth: boolean,
     treeContext: CommentExportTreeContext,
 ) {
@@ -2075,14 +2300,9 @@ function appendVisibleCommentMarkdown(
     if (comment.replies.length === 0) return;
 
     const thisSubtreeUnlimited = unlimitedDepth || expandedMoreById.has(comment.id);
-    const { visible } = selectVisibleChildren(
+    const { visible } = getVisibleChildrenFromPlan(
         comment,
-        comment.replies,
-        depth + 1,
-        settings.depthLimit,
-        settings.hideLow,
-        settings.promotedPathIds,
-        thisSubtreeUnlimited,
+        settings.visibilityPlan,
     );
 
     for (let i = 0; i < visible.length; i += 1) {

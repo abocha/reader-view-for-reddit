@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
     renderArticle,
     renderMedia,
+    buildVisibilityPlan,
     renderCommentTree,
     initPreferences,
     sanitizeHtmlToFragment
@@ -112,11 +113,20 @@ describe('Reader UI Rendering', () => {
                 replies: []
             };
 
+            const visibilityPlan = buildVisibilityPlan(comment as any, {
+                depthLimit: 5,
+                smartMode: false,
+                utilityThreshold: 0.75,
+                siblingCloseDelta: 0.6,
+                maxExtraDeepVisiblePerRoot: 12,
+            }, {
+                expandedMoreIds: new Set<string>(),
+                expandedLowScoreIds: new Set<string>(),
+            });
+
             const el = renderCommentTree(comment, {
                 depthLimit: 5,
-                autoDepth: true,
-                hideLow: false,
-                promotedPathIds: new Set()
+                visibilityPlan,
             }, 0, false);
 
             expect(el.className).toBe('comment');
