@@ -98,6 +98,8 @@ describe('extractRedditPost', () => {
             expect(result.payload.title).toBe('Fallback Title');
             expect(result.payload.bodyHtml).toBe('<p>Fallback body content</p>');
             expect(result.payload.isFallback).toBe(true);
+            expect(result.payload.permalink).toBe('/r/science/comments/12345/new_discovery/');
+            expect(result.payload.postId).toBe('12345');
         }
     });
 

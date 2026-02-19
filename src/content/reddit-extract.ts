@@ -64,6 +64,32 @@ export async function extractRedditPost(): Promise<ExtractionResult> {
     const isRedditHostname = (hostname: string): boolean =>
         hostname === 'reddit.com' || hostname.endsWith('.reddit.com');
 
+    const extractThreadMetaFromPath = (pathname: string): { permalink?: string; postId?: string } => {
+        const segments = pathname.split('/').filter(Boolean);
+        if (segments.length === 0) return {};
+
+        let commentsIndex: number;
+        if (segments[0]?.toLowerCase() === 'r') {
+            if (segments.length < 4) return {};
+            if (segments[2]?.toLowerCase() !== 'comments') return {};
+            commentsIndex = 2;
+        } else if (segments[0]?.toLowerCase() === 'comments') {
+            commentsIndex = 0;
+        } else {
+            return {};
+        }
+
+        const postId = (segments[commentsIndex + 1] || '').trim();
+        if (!postId) return {};
+
+        // Keep only the thread path: .../comments/<postId>/<slug?>/
+        const parts = segments.slice(0, commentsIndex + 2);
+        const slug = segments[commentsIndex + 2];
+        if (slug) parts.push(slug);
+
+        return { permalink: `/${parts.join('/')}/`, postId };
+    };
+
     try {
         const loc = window.location;
         // Basic validation
@@ -212,6 +238,7 @@ export async function extractRedditPost(): Promise<ExtractionResult> {
                 bodyMarkdown: '',
                 isFallback: true,
                 url: loc.href,
+                ...extractThreadMetaFromPath(loc.pathname),
                 nsfw: false,
                 spoiler: false,
                 score: undefined,

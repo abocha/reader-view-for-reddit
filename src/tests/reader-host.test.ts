@@ -442,6 +442,91 @@ describe('Reader Host Logic', () => {
             showMore?.click();
             showLow?.click();
         });
+
+        it('should show comment time context and permalink when thread metadata is available', () => {
+            document.body.innerHTML = '<article id="spike-article"></article>';
+
+            renderArticle({
+                title: 'Thread',
+                author: 'op',
+                subreddit: 'r/test',
+                bodyHtml: '<p>body</p>',
+                bodyMarkdown: 'body',
+                url: 'https://www.reddit.com/r/test/comments/abc123/thread/',
+                permalink: '/r/test/comments/abc123/thread/',
+                postId: 'abc123',
+                isFallback: false,
+            } as any);
+
+            const comment = {
+                id: 'c-time',
+                author: 'clock',
+                bodyMarkdown: 'timed',
+                bodyHtml: '<p>timed</p>',
+                score: 4,
+                createdUtc: Math.floor(Date.now() / 1000) - 3600,
+                replies: [],
+            };
+
+            const visibilityPlan = buildVisibilityPlan(comment as any, {
+                depthLimit: 5,
+                smartMode: false,
+                utilityThreshold: 0.75,
+                siblingCloseDelta: 0.6,
+                maxExtraDeepVisiblePerRoot: 12,
+            }, {
+                expandedMoreIds: new Set<string>(),
+                expandedLowScoreIds: new Set<string>(),
+            });
+
+            const wrapper = renderCommentTree(comment as any, { depthLimit: 5, visibilityPlan }, 0, false);
+            const metaText = wrapper.querySelector('.comment-meta-text') as HTMLElement | null;
+            expect(metaText?.textContent).toContain('u/clock • 4 points');
+            expect(metaText?.getAttribute('title')).toBeTruthy();
+
+            const permalink = wrapper.querySelector('a.comment-permalink') as HTMLAnchorElement | null;
+            expect(permalink?.getAttribute('href')).toBe('https://www.reddit.com/r/test/comments/abc123/thread/c-time/');
+            expect(permalink?.getAttribute('target')).toBe('_blank');
+        });
+
+        it('should normalize malformed thread permalink before building comment permalink', () => {
+            document.body.innerHTML = '<article id="spike-article"></article>';
+
+            renderArticle({
+                title: 'Thread',
+                author: 'op',
+                subreddit: 'r/test',
+                bodyHtml: '<p>body</p>',
+                bodyMarkdown: 'body',
+                url: 'https://www.reddit.com/r/test/comments/abc123/thread/c456/',
+                permalink: '/r/test/comments/abc123/thread/c456/',
+                postId: 'abc123',
+                isFallback: true,
+            } as any);
+
+            const comment = {
+                id: 'c-next',
+                author: 'clock',
+                bodyMarkdown: 'timed',
+                bodyHtml: '<p>timed</p>',
+                replies: [],
+            };
+
+            const visibilityPlan = buildVisibilityPlan(comment as any, {
+                depthLimit: 5,
+                smartMode: false,
+                utilityThreshold: 0.75,
+                siblingCloseDelta: 0.6,
+                maxExtraDeepVisiblePerRoot: 12,
+            }, {
+                expandedMoreIds: new Set<string>(),
+                expandedLowScoreIds: new Set<string>(),
+            });
+
+            const wrapper = renderCommentTree(comment as any, { depthLimit: 5, visibilityPlan }, 0, false);
+            const permalink = wrapper.querySelector('a.comment-permalink') as HTMLAnchorElement | null;
+            expect(permalink?.getAttribute('href')).toBe('https://www.reddit.com/r/test/comments/abc123/thread/c-next/');
+        });
     });
 
     describe('renderCommentTree collapse', () => {

@@ -80,11 +80,40 @@ let pendingCommentFocusId: string | null = null;
 let currentCommentsHasMore = false;
 
 const COMMENTS_LIMIT_OPTIONS = [50, 100, 200, 300, 400, 500] as const;
+const COMMENTS_SORT_OPTIONS = new Set(['best', 'top', 'new', 'old', 'controversial']);
 const DEFAULT_VISIBILITY_POLICY: Omit<VisibilityPolicy, 'depthLimit' | 'smartMode'> = {
     utilityThreshold: 0.75,
     siblingCloseDelta: 0.6,
     maxExtraDeepVisiblePerRoot: 12,
 };
+const COMMENTS_PREF_KEYS = {
+    visible: 'reader-comments-visible',
+    depth: 'reader-comments-depth',
+    smartMode: 'reader-comments-smart-mode',
+    limit: 'reader-comments-limit',
+    sort: 'reader-comments-sort',
+} as const;
+
+function readLocalStorageValue(key: string): string | null {
+    try {
+        return localStorage.getItem(key);
+    } catch {
+        return null;
+    }
+}
+
+function writeLocalStorageValue(key: string, value: string): void {
+    try {
+        localStorage.setItem(key, value);
+    } catch {
+        // ignore localStorage failures
+    }
+}
+
+function persistCommentsPreference(key: keyof typeof COMMENTS_PREF_KEYS, value: string): void {
+    if (isBenchmark) return;
+    writeLocalStorageValue(COMMENTS_PREF_KEYS[key], value);
+}
 
 function coerceCommentsLimit(value: number | null | undefined): number {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 100;
@@ -166,6 +195,7 @@ function updateCommentsFooter(options: { hasMore: boolean; limit: number; loadin
             const idx = COMMENTS_LIMIT_OPTIONS.indexOf(currentLimit as any);
             const next = COMMENTS_LIMIT_OPTIONS[Math.min(COMMENTS_LIMIT_OPTIONS.length - 1, Math.max(0, idx) + 1)] ?? 500;
             if (limitEl) limitEl.value = String(next);
+            persistCommentsPreference('limit', String(next));
             void loadComments({ reason: 'load_more', preserveExisting: true });
         };
     }
@@ -789,6 +819,7 @@ export function initActions() {
     const depthVal = document.getElementById('depth-val');
 
     if (depthInput && depthVal) {
+        depthVal.textContent = depthInput.value;
         depthInput.addEventListener('input', () => {
             depthVal.textContent = depthInput.value;
         });
@@ -872,9 +903,48 @@ export function initCommentsUI() {
     const smartModeEl = document.getElementById('comments-smart-mode') as HTMLInputElement | null;
     const limitEl = document.getElementById('comments-limit') as HTMLSelectElement | null;
     const sortEl = document.getElementById('comments-sort') as HTMLSelectElement | null;
+    const depthVal = document.getElementById('depth-val') as HTMLElement | null;
+
+    if (!isBenchmark) {
+        const storedVisible = readLocalStorageValue(COMMENTS_PREF_KEYS.visible);
+        if (toggleSwitch && (storedVisible === 'true' || storedVisible === 'false')) {
+            toggleSwitch.checked = storedVisible === 'true';
+        }
+
+        const storedDepth = readLocalStorageValue(COMMENTS_PREF_KEYS.depth);
+        if (depthEl && storedDepth !== null) {
+            const parsedDepth = Number.parseInt(storedDepth, 10);
+            if (Number.isFinite(parsedDepth)) {
+                depthEl.value = String(Math.min(5, Math.max(0, parsedDepth)));
+            }
+        }
+
+        const storedSmartMode = readLocalStorageValue(COMMENTS_PREF_KEYS.smartMode);
+        if (smartModeEl && (storedSmartMode === 'true' || storedSmartMode === 'false')) {
+            smartModeEl.checked = storedSmartMode === 'true';
+        }
+
+        const storedLimit = readLocalStorageValue(COMMENTS_PREF_KEYS.limit);
+        if (limitEl && storedLimit !== null) {
+            const parsedLimit = Number.parseInt(storedLimit, 10);
+            if (Number.isFinite(parsedLimit)) {
+                limitEl.value = String(coerceCommentsLimit(parsedLimit));
+            }
+        }
+
+        const storedSort = readLocalStorageValue(COMMENTS_PREF_KEYS.sort);
+        if (sortEl && storedSort && COMMENTS_SORT_OPTIONS.has(storedSort)) {
+            sortEl.value = storedSort;
+        }
+    }
+
+    if (depthEl && depthVal) {
+        depthVal.textContent = depthEl.value;
+    }
 
     toggleSwitch?.addEventListener('change', () => {
         commentsVisible = toggleSwitch.checked;
+        persistCommentsPreference('visible', String(commentsVisible));
         setCommentsVisibility(commentsVisible);
         if (!commentsVisible) {
             commentsAbort?.abort();
@@ -886,11 +956,17 @@ export function initCommentsUI() {
     });
 
     const onFetchConfigChange = () => {
+        if (limitEl) persistCommentsPreference('limit', limitEl.value);
+        if (sortEl && COMMENTS_SORT_OPTIONS.has(sortEl.value)) {
+            persistCommentsPreference('sort', sortEl.value);
+        }
         if (!commentsVisible) return;
         void loadComments({ reason: 'filter', preserveExisting: true });
     };
 
     const onViewConfigChange = () => {
+        if (depthEl) persistCommentsPreference('depth', depthEl.value);
+        if (smartModeEl) persistCommentsPreference('smartMode', String(smartModeEl.checked));
         if (!commentsVisible) return;
         rerenderComments();
     };
@@ -1195,13 +1271,105 @@ function enhanceSpoilers(container: HTMLElement) {
     }
 }
 
-function getPostPermalinkUrl(post: RedditPostPayload): string | null {
+function normalizeThreadPermalinkPath(pathname: string): string {
+    const segments = pathname.split('/').filter(Boolean);
+    if (segments.length === 0) return '/';
+
+    let commentsIndex = -1;
+    if (segments[0]?.toLowerCase() === 'r' && segments[2]?.toLowerCase() === 'comments') {
+        commentsIndex = 2;
+    } else if (segments[0]?.toLowerCase() === 'comments') {
+        commentsIndex = 0;
+    }
+
+    if (commentsIndex >= 0 && segments[commentsIndex + 1]) {
+        // Keep thread path only: .../comments/<postId>/<slug?>/
+        const parts = segments.slice(0, commentsIndex + 2);
+        const slug = segments[commentsIndex + 2];
+        if (slug) parts.push(slug);
+        return `/${parts.join('/')}/`;
+    }
+
+    return pathname.endsWith('/') ? pathname : `${pathname}/`;
+}
+
+function getPostPermalinkPath(post: RedditPostPayload): string | null {
     if (post.permalink) {
         const path = post.permalink.startsWith('/') ? post.permalink : `/${post.permalink}`;
-        return `https://www.reddit.com${path}`;
+        return normalizeThreadPermalinkPath(path);
     }
+
+    const parsed = parseHttpUrl(post.url);
+    if (!parsed) return null;
+    if (!/\/comments\/[^/]+/i.test(parsed.pathname)) return null;
+    return normalizeThreadPermalinkPath(parsed.pathname);
+}
+
+function derivePostIdFromPath(pathname: string): string | null {
+    const match = pathname.match(/\/comments\/([^/?#]+)/i);
+    if (!match) return null;
+    const id = match[1]?.trim();
+    return id || null;
+}
+
+function getPostPermalinkUrl(post: RedditPostPayload): string | null {
+    const path = getPostPermalinkPath(post);
+    if (path) return `https://www.reddit.com${path}`;
     const parsed = parseHttpUrl(post.url);
     return parsed ? parsed.toString() : null;
+}
+
+function getCommentPermalinkUrl(commentId: string): string | null {
+    if (!currentPost || !commentId) return null;
+
+    const path = getPostPermalinkPath(currentPost);
+    if (path) return `https://www.reddit.com${path}${encodeURIComponent(commentId)}/`;
+
+    const parsed = parseHttpUrl(currentPost.url);
+    const postId = currentPost.postId || (parsed ? derivePostIdFromPath(parsed.pathname) : null);
+    if (!postId) return null;
+    return `https://www.reddit.com/comments/${encodeURIComponent(postId)}/_/${encodeURIComponent(commentId)}/`;
+}
+
+function formatCommentRelativeTime(createdUtc: number | undefined): { label: string; title: string } | null {
+    if (typeof createdUtc !== 'number' || !Number.isFinite(createdUtc)) return null;
+    const createdMs = createdUtc * 1000;
+    if (!Number.isFinite(createdMs)) return null;
+    const createdDate = new Date(createdMs);
+    if (Number.isNaN(createdDate.valueOf())) return null;
+
+    const deltaSec = Math.round((createdMs - Date.now()) / 1000);
+    const abs = Math.abs(deltaSec);
+
+    let unit: Intl.RelativeTimeFormatUnit = 'second';
+    let value = deltaSec;
+    if (abs >= 60 * 60 * 24 * 365) {
+        unit = 'year';
+        value = Math.round(deltaSec / (60 * 60 * 24 * 365));
+    } else if (abs >= 60 * 60 * 24 * 30) {
+        unit = 'month';
+        value = Math.round(deltaSec / (60 * 60 * 24 * 30));
+    } else if (abs >= 60 * 60 * 24) {
+        unit = 'day';
+        value = Math.round(deltaSec / (60 * 60 * 24));
+    } else if (abs >= 60 * 60) {
+        unit = 'hour';
+        value = Math.round(deltaSec / (60 * 60));
+    } else if (abs >= 60) {
+        unit = 'minute';
+        value = Math.round(deltaSec / 60);
+    }
+
+    const title = createdDate.toLocaleString();
+    if (typeof Intl === 'undefined' || typeof Intl.RelativeTimeFormat !== 'function') {
+        return { label: title, title };
+    }
+
+    const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+    return {
+        label: formatter.format(value, unit),
+        title,
+    };
 }
 
 export function renderMedia(post: RedditPostPayload): HTMLElement | null {
@@ -1719,8 +1887,24 @@ export function renderCommentTree(
     const metaText = document.createElement('div');
     metaText.className = 'comment-meta-text';
     const scoreText = typeof comment.score === 'number' ? ` • ${comment.score} points` : '';
-    metaText.textContent = `u/${comment.author}${scoreText}`;
+    const time = formatCommentRelativeTime(comment.createdUtc);
+    const timeText = time ? ` • ${time.label}` : '';
+    metaText.textContent = `u/${comment.author}${scoreText}${timeText}`;
+    if (time) metaText.title = time.title;
+
     meta.append(toggle, metaText);
+
+    const permalinkUrl = getCommentPermalinkUrl(comment.id);
+    if (permalinkUrl) {
+        const permalink = document.createElement('a');
+        permalink.href = permalinkUrl;
+        permalink.className = 'comment-permalink';
+        permalink.textContent = 'Permalink';
+        permalink.target = '_blank';
+        permalink.rel = 'noopener noreferrer';
+        permalink.title = 'Open this comment on Reddit';
+        meta.appendChild(permalink);
+    }
 
     wrapper.appendChild(meta);
 

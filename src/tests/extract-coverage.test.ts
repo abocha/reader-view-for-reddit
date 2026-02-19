@@ -264,6 +264,28 @@ describe('Extraction Coverage', () => {
             expect(result.payload.title).toBe('OG Title');
             expect(result.payload.bodyHtml).toBe('<p>Meta Description</p>');
             expect(result.payload.isFallback).toBe(true);
+            expect(result.payload.permalink).toBe('/r/foo/comments/123/bar/');
+            expect(result.payload.postId).toBe('123');
+        }
+    });
+
+    it('should trim comment-level tail from fallback permalink metadata', async () => {
+        (globalThis.fetch as any).mockResolvedValue({ ok: false, status: 500 });
+        // @ts-ignore
+        window.location = {
+            hostname: 'www.reddit.com',
+            pathname: '/r/foo/comments/123/bar/c456/',
+            origin: 'https://www.reddit.com',
+            href: 'https://www.reddit.com/r/foo/comments/123/bar/c456/'
+        };
+        document.head.innerHTML = `<meta property="og:title" content="OG Title" />`;
+        document.body.innerHTML = `<div data-testid="post-content"><p>Body</p></div>`;
+
+        const result = await extractRedditPost();
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+            expect(result.payload.permalink).toBe('/r/foo/comments/123/bar/');
+            expect(result.payload.postId).toBe('123');
         }
     });
 
