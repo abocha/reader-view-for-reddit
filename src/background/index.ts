@@ -14,6 +14,12 @@ import { installRuntimeMessageListener } from './runtime-messages';
 type OpenMode = 'same-tab' | 'new-tab';
 
 const SHOULD_RECORD_PERF = typeof __DEV__ !== 'undefined' && __DEV__;
+const SHOULD_DEBUG_LOG = SHOULD_RECORD_PERF;
+
+function debugLog(...args: unknown[]) {
+    if (!SHOULD_DEBUG_LOG) return;
+    console.log(...args);
+}
 
 export async function getOpenMode(): Promise<OpenMode> {
     const data = await browser.storage.sync.get('openMode');
@@ -46,7 +52,7 @@ export async function processTab(tab: Tabs.Tab) {
 
     const traceId = crypto.randomUUID();
     const events = [perf.event('processTab:start', { tabId: tab.id, url: tab.url })];
-    console.log('[Reader Helper] Processing tab:', tab.id, tab.url, `(trace ${traceId})`);
+    debugLog('[Reader Helper] Processing tab:', tab.id, tab.url, `(trace ${traceId})`);
 
     try {
         // 1) Extract payload (prefer background JSON fetch; fall back to executeScript).
@@ -80,7 +86,7 @@ export async function processTab(tab: Tabs.Tab) {
             } catch (err: any) {
                 events.push(perf.event('extract_json:error', { error: err?.message || String(err) }));
                 try {
-                    console.log('[Reader Helper] JSON fetch failed; falling back to executeScript extraction...');
+                    debugLog('[Reader Helper] JSON fetch failed; falling back to executeScript extraction...');
                     const execSpan = perf.span('extract_executeScript');
                     events.push(execSpan.startEvent);
                     const results = await browser.scripting.executeScript({
@@ -112,7 +118,7 @@ export async function processTab(tab: Tabs.Tab) {
         }
 
         events.push(extractOverall.end({ ok: true, method: extractMethod }));
-        console.log('[Reader Helper] Extraction success:', payload?.title);
+        debugLog('[Reader Helper] Extraction success:', payload?.title);
 
         const openMode = await getOpenMode();
 

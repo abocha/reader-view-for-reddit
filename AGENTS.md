@@ -34,12 +34,13 @@
   - crosspost metadata/permalink behavior,
   - async comments loading/races,
   - background runtime message handling and caches.
-- Run `pnpm test` before each PR; run `pnpm test:coverage` for non-trivial changes.
+- This repo commonly ships via direct commits to `main`; run `pnpm test` before pushing to `main` and before tagging a release.
+- Run `pnpm test:coverage` for non-trivial changes.
 
 ## Commit & Pull Request Guidelines
 - Commit style in history is short, imperative, and scoped (examples: `a11y hardening`, `Harden pending payload handling...`).
 - Prefer concise commit subjects describing user-visible or risk-reducing change.
-- PRs should include:
+- If using PRs, include:
   - clear summary and rationale,
   - testing evidence (commands + outcomes),
   - screenshots/GIFs for Reader UI changes,

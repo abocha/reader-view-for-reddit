@@ -35,7 +35,6 @@ if (!/^\d+\.\d+\.\d+$/.test(version)) {
     process.exit(1);
 }
 
-runStreaming('pnpm', ['run', 'build']);
 runStreaming('pnpm', ['run', 'package']);
 
 const artifact = `web-ext-artifacts/reader_view_for_reddit-${version}.zip`;

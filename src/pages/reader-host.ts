@@ -3,7 +3,10 @@ import { RedditPostPayload } from '../content/reddit-extract';
 import { perf, PerfReport } from '../perf/trace';
 import { touchSessionToken } from '../shared/session-token-cache';
 
-console.log("[Reader Host] Script loaded");
+const SHOULD_DEBUG_LOG = typeof __DEV__ !== 'undefined' && __DEV__;
+if (SHOULD_DEBUG_LOG) {
+    console.log("[Reader Host] Script loaded");
+}
 
 type CommentNode = {
     id: string;

@@ -59,11 +59,22 @@ This repository uses in-repo documentation as the system of record.
   - `pnpm release:major`
 - Backfill or replace a missing release asset on an existing tag:
   - `pnpm release:fix-assets -- --tag v2.3.1 --version 2.3.1`
+- Manually rerun release packaging for an existing tag from GitHub Actions:
+  - `gh workflow run release.yml -f tag=v2.3.1`
 
 Tag release flow:
 1. Local script validates clean `main`, runs preflight, bumps `package.json` + `manifest.json`, commits, tags, and pushes.
-2. GitHub Actions `release` workflow runs `typecheck`, `test`, `build`, `package`.
+2. GitHub Actions `release` workflow runs `typecheck`, `test`, `package` (`package` includes build).
 3. CI publishes/updates GitHub release and uploads `web-ext-artifacts/reader_view_for_reddit-<version>.zip`.
+
+Main-only workflow note:
+- This repo ships by commits directly to `main` (no PR requirement).
+- A dedicated `ci` workflow runs `typecheck` + `test` on every push to `main`.
+- Cut release tags only after `main` CI is green.
+
+Action pinning note:
+- Workflow actions are pinned to commit SHAs for reproducibility.
+- Refresh pinned SHAs periodically during dependency/tooling maintenance.
 
 ## Source Code Submission (AMO reviewers)
 

@@ -12,7 +12,7 @@
     "start:firefox:verbose": "MOZ_ENABLE_WAYLAND=0 web-ext run --source-dir dist --target firefox-desktop --verbose",
     "start:firefox:compat": "NO_AT_BRIDGE=1 XDG_RUNTIME_DIR=/tmp GSETTINGS_BACKEND=memory MOZ_DISABLE_CONTENT_SANDBOX=1 MOZ_ENABLE_WAYLAND=0 web-ext run --source-dir dist --target firefox-desktop",
     "start:firefox:compat:verbose": "NO_AT_BRIDGE=1 XDG_RUNTIME_DIR=/tmp GSETTINGS_BACKEND=memory MOZ_DISABLE_CONTENT_SANDBOX=1 MOZ_ENABLE_WAYLAND=0 web-ext run --source-dir dist --target firefox-desktop --verbose",
-    "package": "web-ext build --source-dir dist --overwrite-dest",
+    "package": "pnpm build && web-ext build --source-dir dist --overwrite-dest",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "docs:check": "node scripts/check-docs.mjs",

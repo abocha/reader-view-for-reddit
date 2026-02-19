@@ -59,6 +59,19 @@ function assertMainBranch() {
     }
 }
 
+function assertNotBehindRemoteMain() {
+    runStreaming('git', ['fetch', 'origin', 'main', '--tags']);
+    const counts = run('git', ['rev-list', '--left-right', '--count', 'origin/main...main']);
+    const [behindRaw] = counts.split(/\s+/);
+    const behind = Number.parseInt(behindRaw ?? '0', 10);
+    if (!Number.isFinite(behind)) {
+        throw new Error(`Unable to parse ahead/behind counts: ${counts}`);
+    }
+    if (behind > 0) {
+        throw new Error(`Local main is behind origin/main by ${behind} commit(s). Pull/rebase first.`);
+    }
+}
+
 function loadJson(path) {
     return JSON.parse(readFileSync(path, 'utf8'));
 }
@@ -70,6 +83,7 @@ function saveJson(path, value) {
 function main() {
     assertCleanWorkingTree();
     assertMainBranch();
+    assertNotBehindRemoteMain();
 
     runStreaming('pnpm', ['run', 'release:preflight']);
 
@@ -90,8 +104,7 @@ function main() {
     runStreaming('git', ['add', 'package.json', 'manifest.json']);
     runStreaming('git', ['commit', '-m', `release ${nextVersion}`]);
     runStreaming('git', ['tag', '-a', `v${nextVersion}`, '-m', `v${nextVersion}`]);
-    runStreaming('git', ['push']);
-    runStreaming('git', ['push', 'origin', `v${nextVersion}`]);
+    runStreaming('git', ['push', '--follow-tags', 'origin', 'main']);
 
     console.log('');
     console.log(`Released v${nextVersion}.`);
