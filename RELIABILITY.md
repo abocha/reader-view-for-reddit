@@ -39,6 +39,8 @@
 - Markdown export tree consistency: node `id`/`p`/`x`/`d` align with visible comment order and depth filtering.
 - Placeholder integrity: `rootMoreChildrenIds` and per-node `moreChildrenIds` stay deduplicated and reachable after merges.
 - Deep-load merge behavior: no duplicate comment nodes, no orphan insertion without parent.
+- Graph integrity: every non-root node has a reachable parent link and no duplicate child IDs per parent.
+- Graph/projection parity: projected nested tree from graph preserves deterministic root/child ordering.
 - Chunked rendering: superseded render jobs do not overwrite newer UI state.
 
 ## Known Limits

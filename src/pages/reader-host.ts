@@ -3,30 +3,32 @@ import type { RedditPostPayload } from '../content/reddit-extract';
 import type { PerfReport } from '../perf/trace';
 import { perf } from '../perf/trace';
 import { touchSessionToken } from '../shared/session-token-cache';
+import {
+    buildGraphFromListing,
+    collectPlaceholdersForScope as collectGraphPlaceholdersForScope,
+    consumePlaceholderIds as consumeGraphPlaceholderIds,
+    createEmptyCommentGraphState,
+    hasResolvableMorePlaceholders as graphHasResolvableMorePlaceholders,
+    mergeMoreChildrenThingsIntoGraph,
+    parseMoreChildrenIds as parseGraphMoreChildrenIds,
+    projectRootsFromGraph,
+    rebuildGraphFromRoots,
+    refreshHasMoreState as refreshGraphHasMoreState,
+    dedupeIds as dedupeGraphIds,
+} from './comments-graph';
+import type {
+    CommentGraphState,
+    CommentNode,
+    GraphMergeResult,
+    GraphPlaceholder,
+} from './comments-graph';
 
 const SHOULD_DEBUG_LOG = typeof __DEV__ !== 'undefined' && __DEV__;
 if (SHOULD_DEBUG_LOG) {
     console.log("[Reader Host] Script loaded");
 }
 
-type CommentNode = {
-    id: string;
-    author: string;
-    bodyMarkdown: string;
-    bodyHtml: string;
-    score?: number;
-    createdUtc?: number;
-    moreChildrenIds?: string[];
-    replies: CommentNode[];
-};
-
-type MorePlaceholder = {
-    parentId: string | null;
-    childrenIds: string[];
-    depth: number;
-    rootId: string | null;
-    sourcePath: string;
-};
+type MorePlaceholder = GraphPlaceholder;
 
 type LoadBudget = {
     maxRequests: number;
@@ -42,12 +44,7 @@ type LoadProgress = {
     errors: string[];
 };
 
-type CommentsMergeResult = {
-    insertedCount: number;
-    updatedCount: number;
-    newPlaceholders: MorePlaceholder[];
-    orphansSkipped: number;
-};
+type CommentsMergeResult = GraphMergeResult;
 
 type NodeStats = {
     id: string;
@@ -96,6 +93,7 @@ type CommentsBulkAction = 'expand_all' | 'collapse_all' | 'reset_view';
 
 let currentPost: RedditPostPayload | null = null;
 let currentComments: CommentNode[] = [];
+let commentsGraph: CommentGraphState = createEmptyCommentGraphState();
 let commentsVisible = true;
 const expandedMoreById = new Set<string>();
 const expandedLowScoreById = new Set<string>();
@@ -125,6 +123,28 @@ let deepLoadState: {
     scope: 'none',
     truncated: false,
 };
+
+function syncCommentsStateFromGraph(updateProjection = true): void {
+    if (updateProjection) {
+        currentComments = projectRootsFromGraph(commentsGraph);
+    }
+    currentRootMoreChildrenIds = [...commentsGraph.rootMoreChildrenIds];
+    currentHasMoreMarker = commentsGraph.hasMoreMarker;
+    currentCommentsHasMore = commentsGraph.hasMore;
+}
+
+function resetCommentsGraphState(): void {
+    commentsGraph = createEmptyCommentGraphState();
+    syncCommentsStateFromGraph(true);
+}
+
+function rebuildCommentsGraphFromRoots(
+    roots: CommentNode[],
+    options?: { hasMoreMarker?: boolean; rootMoreChildrenIds?: string[] },
+): void {
+    commentsGraph = rebuildGraphFromRoots(roots, options);
+    syncCommentsStateFromGraph(true);
+}
 
 const COMMENTS_LIMIT_OPTIONS = [50, 100, 200, 300, 400, 500] as const;
 const COMMENTS_SORT_OPTIONS = new Set(['best', 'top', 'new', 'old', 'controversial']);
@@ -1277,8 +1297,7 @@ export function renderArticle(post: RedditPostPayload) {
     if (!articleEl) return;
 
     currentPost = post;
-    currentComments = [];
-    currentCommentsHasMore = false;
+    resetCommentsGraphState();
     commentsAbort?.abort();
     commentsAbort = null;
     commentsLoadSeq += 1;
@@ -1680,11 +1699,8 @@ async function loadComments(options: LoadCommentsOptions = {}) {
             ? 'Comments are unavailable (fallback extraction was used).'
             : 'Comments are unavailable for this post.');
         listEl.replaceChildren();
-        currentRootMoreChildrenIds = [];
-        currentHasMoreMarker = false;
-        currentCommentsHasMore = false;
+        resetCommentsGraphState();
         updateCommentsFooter({ hasMore: currentCommentsHasMore, limit: getCommentsLimit(), loading: false, permalink: currentPost?.permalink });
-        currentComments = [];
         deepLoadState = { loaded: false, scope: 'none', truncated: false };
         return;
     }
@@ -1735,10 +1751,10 @@ async function loadComments(options: LoadCommentsOptions = {}) {
                 const totalCount = typeof (value as any).totalCount === 'number' ? (value as any).totalCount : undefined;
 
                 if (Array.isArray(cachedComments) && requestSeq === commentsLoadSeq && commentsVisible) {
-                    currentComments = cachedComments;
-                    currentRootMoreChildrenIds = rootMoreChildrenIds;
-                    currentHasMoreMarker = hasMoreMarker;
-                    currentCommentsHasMore = hasMoreMarker;
+                    rebuildCommentsGraphFromRoots(cachedComments, {
+                        hasMoreMarker,
+                        rootMoreChildrenIds,
+                    });
                     expandedMoreById.clear();
                     expandedLowScoreById.clear();
                     collapsedById.clear();
@@ -1788,10 +1804,10 @@ async function loadComments(options: LoadCommentsOptions = {}) {
             totalCount
         }));
         if (requestSeq !== commentsLoadSeq || !commentsVisible) return;
-        currentComments = parsed.comments;
-        currentRootMoreChildrenIds = parsed.rootMoreChildrenIds;
-        currentHasMoreMarker = parsed.hasMore;
-        currentCommentsHasMore = parsed.hasMore;
+        rebuildCommentsGraphFromRoots(parsed.comments, {
+            hasMoreMarker: parsed.hasMore,
+            rootMoreChildrenIds: parsed.rootMoreChildrenIds,
+        });
         expandedMoreById.clear();
         expandedLowScoreById.clear();
         collapsedById.clear();
@@ -1812,11 +1828,11 @@ async function loadComments(options: LoadCommentsOptions = {}) {
                 type: 'COMMENTS_CACHE_SET',
                 key: cacheKey,
                 value: {
-                    comments: parsed.comments,
+                    comments: currentComments,
                     loadedCount: parsed.loadedCount,
-                    hasMore: parsed.hasMore,
-                    hasMoreMarker: parsed.hasMore,
-                    rootMoreChildrenIds: parsed.rootMoreChildrenIds,
+                    hasMore: currentHasMoreMarker,
+                    hasMoreMarker: currentHasMoreMarker,
+                    rootMoreChildrenIds: currentRootMoreChildrenIds,
                     totalCount
                 },
             });
@@ -1850,10 +1866,7 @@ async function loadComments(options: LoadCommentsOptions = {}) {
         });
         if (!preserveExisting) {
             listEl.replaceChildren();
-            currentComments = [];
-            currentRootMoreChildrenIds = [];
-            currentHasMoreMarker = false;
-            currentCommentsHasMore = false;
+            resetCommentsGraphState();
             deepLoadState = { loaded: false, scope: 'none', truncated: false };
             activeDeepLoadParentId = null;
         }
@@ -2023,30 +2036,12 @@ export function cleanRedditHtml(html: string): string {
     return (html || '').replace(/<!-- SC_OFF -->/g, '').replace(/<!-- SC_ON -->/g, '');
 }
 
-function normalizeThingId(value: unknown): string | null {
-    if (typeof value !== 'string') return null;
-    const trimmed = value.trim();
-    if (!trimmed) return null;
-    if (trimmed.startsWith('t1_') || trimmed.startsWith('t3_')) return trimmed.slice(3);
-    return trimmed;
-}
-
 function parseMoreChildrenIds(value: unknown): string[] {
-    if (!Array.isArray(value)) return [];
-    return value
-        .map(item => (typeof item === 'string' ? item.trim() : ''))
-        .filter(Boolean);
+    return parseGraphMoreChildrenIds(value);
 }
 
 function dedupeIds(ids: string[]): string[] {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const id of ids) {
-        if (seen.has(id)) continue;
-        seen.add(id);
-        out.push(id);
-    }
-    return out;
+    return dedupeGraphIds(ids);
 }
 
 function countCommentNodes(node: CommentNode): number {
@@ -2061,31 +2056,13 @@ export function parseCommentsListing(children: any[] | undefined): {
     hasMore: boolean;
     rootMoreChildrenIds: string[];
 } {
-    if (!Array.isArray(children)) return { comments: [], loadedCount: 0, hasMore: false, rootMoreChildrenIds: [] };
-
-    let loadedCount = 0;
-    let hasMore = false;
-    const rootMoreChildrenIds: string[] = [];
-
-    const comments: CommentNode[] = [];
-
-    for (const child of children) {
-        if (!child || typeof child !== 'object') continue;
-        if (child.kind === 'more') {
-            hasMore = true;
-            rootMoreChildrenIds.push(...parseMoreChildrenIds((child as any)?.data?.children));
-            continue;
-        }
-        if (child.kind !== 't1') continue;
-
-        const node = parseComment(child, 10);
-        if (!node) continue;
-
-        loadedCount += countCommentNodes(node);
-        comments.push(node);
-    }
-
-    return { comments, loadedCount, hasMore, rootMoreChildrenIds: dedupeIds(rootMoreChildrenIds) };
+    const { graph, loadedCount } = buildGraphFromListing(children, parseComment);
+    return {
+        comments: projectRootsFromGraph(graph),
+        loadedCount,
+        hasMore: graph.hasMoreMarker,
+        rootMoreChildrenIds: [...graph.rootMoreChildrenIds],
+    };
 }
 
 export function parseComment(wrapper: any, remainingDepth: number): CommentNode | null {
@@ -2142,263 +2119,27 @@ function countLoadedComments(comments: CommentNode[]): number {
     return total;
 }
 
-function countMoreChildrenIds(node: CommentNode): number {
-    const own = node.moreChildrenIds?.length ?? 0;
-    let nested = 0;
-    for (const reply of node.replies) nested += countMoreChildrenIds(reply);
-    return own + nested;
-}
-
 function hasResolvableMorePlaceholders(): boolean {
-    if (currentRootMoreChildrenIds.length > 0) return true;
-    return currentComments.some(comment => countMoreChildrenIds(comment) > 0);
+    return graphHasResolvableMorePlaceholders(commentsGraph);
 }
 
 function refreshCommentsHasMore(): void {
-    currentCommentsHasMore = currentHasMoreMarker || hasResolvableMorePlaceholders();
-}
-
-function findCommentById(commentId: string): CommentNode | null {
-    if (!commentId) return null;
-    const queue = [...currentComments];
-    while (queue.length > 0) {
-        const node = queue.shift()!;
-        if (node.id === commentId) return node;
-        if (node.replies.length > 0) queue.push(...node.replies);
-    }
-    return null;
-}
-
-type CommentsIndex = {
-    byId: Map<string, CommentNode>;
-    depthById: Map<string, number>;
-    parentById: Map<string, string | null>;
-};
-
-function buildCommentsIndex(roots: CommentNode[]): CommentsIndex {
-    const byId = new Map<string, CommentNode>();
-    const depthById = new Map<string, number>();
-    const parentById = new Map<string, string | null>();
-
-    const walk = (node: CommentNode, depth: number, parentId: string | null) => {
-        byId.set(node.id, node);
-        depthById.set(node.id, depth);
-        parentById.set(node.id, parentId);
-        for (const reply of node.replies) walk(reply, depth + 1, node.id);
-    };
-
-    for (const root of roots) walk(root, 0, null);
-    return { byId, depthById, parentById };
-}
-
-function collectPlaceholdersFromNode(
-    node: CommentNode,
-    depth: number,
-    rootId: string | null,
-    sourcePath: string,
-    out: MorePlaceholder[],
-): void {
-    const ids = dedupeIds(node.moreChildrenIds ?? []);
-    if (ids.length > 0) {
-        out.push({
-            parentId: node.id,
-            childrenIds: ids,
-            depth,
-            rootId,
-            sourcePath,
-        });
-    }
-
-    for (let i = 0; i < node.replies.length; i += 1) {
-        const child = node.replies[i]!;
-        collectPlaceholdersFromNode(child, depth + 1, rootId, `${sourcePath}.${i + 1}`, out);
-    }
+    refreshGraphHasMoreState(commentsGraph);
+    syncCommentsStateFromGraph(false);
 }
 
 function collectMorePlaceholdersForScope(scopeParentId: string | null): MorePlaceholder[] {
-    const placeholders: MorePlaceholder[] = [];
-
-    if (scopeParentId === null) {
-        if (currentRootMoreChildrenIds.length > 0) {
-            placeholders.push({
-                parentId: null,
-                childrenIds: dedupeIds(currentRootMoreChildrenIds),
-                depth: 0,
-                rootId: null,
-                sourcePath: 'root',
-            });
-        }
-
-        for (let i = 0; i < currentComments.length; i += 1) {
-            const root = currentComments[i]!;
-            collectPlaceholdersFromNode(root, 0, root.id, `${i + 1}`, placeholders);
-        }
-        return placeholders;
-    }
-
-    const node = findCommentById(scopeParentId);
-    if (!node) return placeholders;
-    collectPlaceholdersFromNode(node, 0, node.id, node.id, placeholders);
-    return placeholders;
+    return collectGraphPlaceholdersForScope(commentsGraph, scopeParentId);
 }
 
 function consumePlaceholderIdsForParent(parentId: string | null, consumedIds: string[]): void {
-    const consumed = new Set(consumedIds);
-    if (consumed.size === 0) return;
-
-    if (parentId === null) {
-        currentRootMoreChildrenIds = currentRootMoreChildrenIds.filter(id => !consumed.has(id));
-        return;
-    }
-
-    const parent = findCommentById(parentId);
-    if (!parent) return;
-    parent.moreChildrenIds = (parent.moreChildrenIds ?? []).filter(id => !consumed.has(id));
-}
-
-function appendPlaceholderIdsToParent(index: CommentsIndex, parentId: string | null, ids: string[]): void {
-    const nextIds = dedupeIds(ids);
-    if (nextIds.length === 0) return;
-
-    if (parentId === null) {
-        currentRootMoreChildrenIds = dedupeIds([...currentRootMoreChildrenIds, ...nextIds]);
-        return;
-    }
-
-    const parent = index.byId.get(parentId);
-    if (!parent) return;
-    parent.moreChildrenIds = dedupeIds([...(parent.moreChildrenIds ?? []), ...nextIds]);
-}
-
-function attachChildNode(
-    roots: CommentNode[],
-    index: CommentsIndex,
-    parentId: string | null,
-    node: CommentNode,
-): boolean {
-    if (parentId === null) {
-        if (!roots.some(root => root.id === node.id)) {
-            roots.push(node);
-        }
-        index.parentById.set(node.id, null);
-        index.depthById.set(node.id, 0);
-        return true;
-    }
-
-    const parent = index.byId.get(parentId);
-    if (!parent) return false;
-
-    if (!parent.replies.some(reply => reply.id === node.id)) {
-        parent.replies.push(node);
-    }
-    const parentDepth = index.depthById.get(parentId) ?? 0;
-    index.parentById.set(node.id, parentId);
-    index.depthById.set(node.id, parentDepth + 1);
-    return true;
-}
-
-function mergeIncomingCommentNode(
-    roots: CommentNode[],
-    index: CommentsIndex,
-    result: CommentsMergeResult,
-    parentId: string | null,
-    incoming: CommentNode,
-): CommentNode | null {
-    const existing = index.byId.get(incoming.id);
-    if (existing) {
-        existing.author = incoming.author || existing.author;
-        existing.bodyMarkdown = incoming.bodyMarkdown || existing.bodyMarkdown;
-        existing.bodyHtml = incoming.bodyHtml || existing.bodyHtml;
-        existing.score = typeof incoming.score === 'number' ? incoming.score : existing.score;
-        existing.createdUtc = typeof incoming.createdUtc === 'number' ? incoming.createdUtc : existing.createdUtc;
-        existing.moreChildrenIds = dedupeIds([...(existing.moreChildrenIds ?? []), ...(incoming.moreChildrenIds ?? [])]);
-        if (parentId === null || index.byId.has(parentId)) {
-            void attachChildNode(roots, index, parentId, existing);
-        }
-        result.updatedCount += 1;
-        for (const child of incoming.replies) {
-            mergeIncomingCommentNode(roots, index, result, existing.id, child);
-        }
-        return existing;
-    }
-
-    const created: CommentNode = {
-        id: incoming.id,
-        author: incoming.author,
-        bodyMarkdown: incoming.bodyMarkdown,
-        bodyHtml: incoming.bodyHtml,
-        score: incoming.score,
-        createdUtc: incoming.createdUtc,
-        moreChildrenIds: dedupeIds(incoming.moreChildrenIds ?? []),
-        replies: [],
-    };
-
-    if (!attachChildNode(roots, index, parentId, created)) {
-        result.orphansSkipped += 1;
-        return null;
-    }
-
-    index.byId.set(created.id, created);
-    result.insertedCount += 1;
-    for (const child of incoming.replies) {
-        mergeIncomingCommentNode(roots, index, result, created.id, child);
-    }
-    return created;
-}
-
-function normalizeParentCommentId(parentThingId: unknown, postId: string): string | null {
-    if (typeof parentThingId !== 'string' || !parentThingId) return null;
-    if (parentThingId.startsWith('t3_')) return null;
-    const normalized = normalizeThingId(parentThingId);
-    if (!normalized || normalized === postId) return null;
-    return normalized;
+    consumeGraphPlaceholderIds(commentsGraph, parentId, consumedIds);
+    syncCommentsStateFromGraph(true);
 }
 
 function mergeMoreChildrenThings(things: any[], postId: string): CommentsMergeResult {
-    const result: CommentsMergeResult = {
-        insertedCount: 0,
-        updatedCount: 0,
-        newPlaceholders: [],
-        orphansSkipped: 0,
-    };
-    if (!Array.isArray(things) || things.length === 0) return result;
-
-    const index = buildCommentsIndex(currentComments);
-
-    for (const thing of things) {
-        if (!thing || typeof thing !== 'object') continue;
-        if (thing.kind === 't1') {
-            const node = parseComment(thing, 10);
-            if (!node) continue;
-            const parentId = normalizeParentCommentId((thing as any)?.data?.parent_id, postId);
-            const merged = mergeIncomingCommentNode(currentComments, index, result, parentId, node);
-            if (!merged) continue;
-            if ((merged.moreChildrenIds?.length ?? 0) > 0) {
-                result.newPlaceholders.push({
-                    parentId: merged.id,
-                    childrenIds: dedupeIds(merged.moreChildrenIds ?? []),
-                    depth: index.depthById.get(merged.id) ?? 0,
-                    rootId: null,
-                    sourcePath: merged.id,
-                });
-            }
-            continue;
-        }
-
-        if (thing.kind === 'more') {
-            const parentId = normalizeParentCommentId((thing as any)?.data?.parent_id, postId);
-            const childrenIds = parseMoreChildrenIds((thing as any)?.data?.children);
-            appendPlaceholderIdsToParent(index, parentId, childrenIds);
-            result.newPlaceholders.push({
-                parentId,
-                childrenIds,
-                depth: parentId ? (index.depthById.get(parentId) ?? 0) + 1 : 0,
-                rootId: null,
-                sourcePath: parentId ?? 'root',
-            });
-        }
-    }
-
+    const result = mergeMoreChildrenThingsIntoGraph(commentsGraph, things, postId, parseComment);
+    syncCommentsStateFromGraph(true);
     return result;
 }
 

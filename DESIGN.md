@@ -31,6 +31,8 @@ Reader View for Reddit is a Firefox MV3 extension that extracts Reddit post cont
   - `ON`: planner-based deep expansion + hard-low collapsing.
   - `OFF`: depth-only visibility (no smart expansion, no low-score auto-collapse).
 - Comment parsing preserves unresolved placeholders as explicit IDs (`moreChildrenIds` per node + root-level IDs) so deeper loading is deterministic.
+- Comment runtime state is graph-backed (`nodesById`, `rootIds`, parent/child links, root/node placeholder IDs) and treated as the structural source of truth.
+- Reader host currently projects graph state back to nested comment trees for render/planner/export compatibility during the Phase 4 migration.
 - Deep-loading is branch/root scoped and budget-bound (`requests`, `nodes`, `time`) to keep UI responsive on typical laptops.
 - Large comment renders use chunked root rendering; structure/state correctness is preserved when jobs are superseded.
 - Markdown comment export structural truth is explicit node fields (`id`, `p`, `x`, `d`) in `[node ...]`; ASCII tree prefixes are visual only.
