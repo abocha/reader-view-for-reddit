@@ -22,6 +22,9 @@ import type {
     GraphMergeResult,
     GraphPlaceholder,
 } from './comments-graph';
+import { buildCommentProjection } from './comments-projection';
+import { createCommentsRenderer } from './comments-renderer';
+import type { CommentsRenderer, RootRenderItem } from './comments-renderer';
 
 const SHOULD_DEBUG_LOG = typeof __DEV__ !== 'undefined' && __DEV__;
 if (SHOULD_DEBUG_LOG) {
@@ -94,6 +97,7 @@ type CommentsBulkAction = 'expand_all' | 'collapse_all' | 'reset_view';
 let currentPost: RedditPostPayload | null = null;
 let currentComments: CommentNode[] = [];
 let commentsGraph: CommentGraphState = createEmptyCommentGraphState();
+let commentsRenderer: CommentsRenderer<CommentNode, RenderTreeSettings> | null = null;
 let commentsVisible = true;
 const expandedMoreById = new Set<string>();
 const expandedLowScoreById = new Set<string>();
@@ -159,8 +163,6 @@ const DEFAULT_DEEP_LOAD_BUDGET: LoadBudget = {
     maxMillis: 3500,
 };
 const MORECHILDREN_BATCH_SIZE = 25;
-const CHUNKED_RENDER_NODE_THRESHOLD = 220;
-const CHUNKED_RENDER_ROOT_BATCH = 3;
 const COMMENTS_PREF_KEYS = {
     visible: 'reader-comments-visible',
     depth: 'reader-comments-depth',
@@ -1699,6 +1701,7 @@ async function loadComments(options: LoadCommentsOptions = {}) {
             ? 'Comments are unavailable (fallback extraction was used).'
             : 'Comments are unavailable for this post.');
         listEl.replaceChildren();
+        commentsRenderer?.invalidate();
         resetCommentsGraphState();
         updateCommentsFooter({ hasMore: currentCommentsHasMore, limit: getCommentsLimit(), loading: false, permalink: currentPost?.permalink });
         deepLoadState = { loaded: false, scope: 'none', truncated: false };
@@ -1720,6 +1723,7 @@ async function loadComments(options: LoadCommentsOptions = {}) {
     if (sortEl) sortEl.disabled = true;
     if (!preserveExisting) {
         listEl.replaceChildren();
+        commentsRenderer?.invalidate();
     }
     updateCommentsFooter({
         hasMore: preserveExisting ? currentCommentsHasMore : false,
@@ -1866,6 +1870,7 @@ async function loadComments(options: LoadCommentsOptions = {}) {
         });
         if (!preserveExisting) {
             listEl.replaceChildren();
+            commentsRenderer?.invalidate();
             resetCommentsGraphState();
             deepLoadState = { loaded: false, scope: 'none', truncated: false };
             activeDeepLoadParentId = null;
@@ -2258,12 +2263,13 @@ function rerenderComments() {
 
     const renderSeq = ++commentsRenderSeq;
     captureCommentFocus();
-    listEl.replaceChildren();
 
     const searchQuery = getCommentsSearchQuery();
     const searchActive = searchQuery.length > 0;
     const filteredRoots = filterCommentsBySearch(currentComments, searchQuery);
     if (searchQuery && filteredRoots.length === 0) {
+        commentsRenderer?.invalidate();
+        listEl.replaceChildren();
         const empty = document.createElement('div');
         empty.className = 'comment-collapsed';
         empty.textContent = `No comments match "${searchQuery}".`;
@@ -2291,41 +2297,50 @@ function rerenderComments() {
         };
     });
 
-    const finalize = () => {
-        if (renderSeq !== commentsRenderSeq) return;
-        restoreCommentFocus();
-        scheduleEnhance(listEl);
-    };
+    const projection = buildCommentProjection(renderItems, {
+        collapsedById,
+        expandedMoreById,
+        expandedLowScoreById,
+        autoModeratorExpandedById,
+    });
 
-    const estimatedNodes = countLoadedComments(filteredRoots);
-    const shouldChunk = estimatedNodes >= CHUNKED_RENDER_NODE_THRESHOLD && renderItems.length > 1;
-    if (!shouldChunk) {
-        for (const item of renderItems) {
-            listEl.appendChild(renderCommentTree(item.top, item.settings, 0, false));
-        }
-        finalize();
-        return;
+    const rootRenderItems: Array<RootRenderItem<CommentNode, RenderTreeSettings>> = projection.roots
+        .map((rootEntry) => {
+            const item = renderItems[rootEntry.itemIndex];
+            if (!item) return null;
+            return {
+                key: rootEntry.key,
+                signature: rootEntry.signature,
+                top: item.top,
+                settings: item.settings,
+            };
+        })
+        .filter((item): item is RootRenderItem<CommentNode, RenderTreeSettings> => Boolean(item));
+
+    if (!commentsRenderer) {
+        commentsRenderer = createCommentsRenderer<CommentNode, RenderTreeSettings>(
+            listEl,
+            (top, settings) => renderCommentTree(top, settings, 0, false),
+        );
     }
 
-    let cursor = 0;
-    const renderChunk = () => {
+    let changedRoots: HTMLElement[];
+    try {
+        const result = commentsRenderer.apply(rootRenderItems);
+        changedRoots = result.changedRoots;
+    } catch (err) {
+        console.warn('[Reader Host] Incremental render failed; falling back to reset', err);
+        const fallback = commentsRenderer.reset(rootRenderItems);
+        changedRoots = fallback.changedRoots;
+    }
+
+    const finalize = (targets: HTMLElement[]) => {
         if (renderSeq !== commentsRenderSeq) return;
-        const frag = document.createDocumentFragment();
-        let renderedRoots = 0;
-        while (cursor < renderItems.length && renderedRoots < CHUNKED_RENDER_ROOT_BATCH) {
-            const item = renderItems[cursor]!;
-            frag.appendChild(renderCommentTree(item.top, item.settings, 0, false));
-            cursor += 1;
-            renderedRoots += 1;
-        }
-        listEl.appendChild(frag);
-        if (cursor < renderItems.length) {
-            window.setTimeout(renderChunk, 0);
-            return;
-        }
-        finalize();
+        restoreCommentFocus();
+        if (targets.length === 0) return;
+        for (const el of targets) scheduleEnhance(el);
     };
-    renderChunk();
+    finalize(changedRoots);
 }
 
 function getVisibleChildrenFromPlan(comment: CommentNode, plan: VisibilityPlan): {
@@ -2418,7 +2433,7 @@ export function renderCommentTree(
 
     if (isCollapsed) {
         const collapsed = document.createElement('div');
-        collapsed.className = 'comment-collapsed';
+        collapsed.className = 'comment-collapsed comment-fragment-enter';
         collapsed.textContent = buildCommentSnippet(comment);
         wrapper.appendChild(collapsed);
         if (options?.lowScore) {
@@ -2436,7 +2451,7 @@ export function renderCommentTree(
     }
 
     const body = document.createElement('div');
-    body.className = 'comment-body';
+    body.className = 'comment-body comment-fragment-enter';
     body.id = bodyId;
     body.appendChild(sanitizeHtmlToFragment(comment.bodyHtml));
     wrapper.appendChild(body);

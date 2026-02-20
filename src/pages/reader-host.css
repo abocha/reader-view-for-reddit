@@ -268,6 +268,61 @@
     border-left: 2px solid var(--border-color);
 }
 
+/* Incremental comments motion */
+.rvrr-comment-root-enter {
+    opacity: 0;
+    transform: translateY(6px);
+}
+
+.rvrr-comment-root-enter.rvrr-comment-root-enter-active {
+    opacity: 1;
+    transform: translateY(0);
+    transition:
+        opacity var(--dur-2) var(--ease-standard),
+        transform var(--dur-2) var(--ease-standard);
+}
+
+.rvrr-comment-root-replace {
+    animation: rvrr-comment-root-replace var(--dur-2) var(--ease-standard);
+}
+
+.rvrr-comment-root-move {
+    animation: rvrr-comment-root-move var(--dur-1) var(--ease-standard);
+}
+
+.comment-fragment-enter {
+    animation: rvrr-comment-fragment-enter var(--dur-2) var(--ease-standard);
+}
+
+@keyframes rvrr-comment-root-replace {
+    from {
+        opacity: 0.65;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes rvrr-comment-root-move {
+    from {
+        transform: translateY(-2px);
+    }
+    to {
+        transform: translateY(0);
+    }
+}
+
+@keyframes rvrr-comment-fragment-enter {
+    from {
+        opacity: 0;
+        transform: translateY(3px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 .comment-meta {
     font-size: 0.85em;
     color: var(--meta-color);
@@ -317,6 +372,21 @@
     font-family: var(--ui-font-family);
     font-size: var(--ui-font-size-md);
     color: var(--meta-color);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .rvrr-comment-root-enter,
+    .rvrr-comment-root-enter.rvrr-comment-root-enter-active {
+        opacity: 1;
+        transform: none;
+        transition: none;
+    }
+
+    .rvrr-comment-root-replace,
+    .rvrr-comment-root-move,
+    .comment-fragment-enter {
+        animation: none;
+    }
 }
 
 /* Notices */
