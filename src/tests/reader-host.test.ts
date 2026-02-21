@@ -398,7 +398,7 @@ describe('Reader Host Logic', () => {
     });
 
     describe('renderCommentTree actions', () => {
-        it('should wire up "show more" and low-score reveal buttons', () => {
+        it('should wire up low-score reveal button', () => {
             const root = {
                 id: 'p',
                 author: 'parent',
@@ -437,14 +437,96 @@ describe('Reader Host Logic', () => {
             );
 
             const buttons = Array.from(wrapper.querySelectorAll('button')) as HTMLButtonElement[];
-            const showMore = buttons.find(b => b.textContent?.includes('Show') && b.textContent.includes('more replies'));
-            const showLow = buttons.find(b => b.textContent?.includes('low-score comment'));
+            const showLow = buttons.find(b => b.textContent?.includes('hidden low-score comment'));
 
-            expect(showMore).toBeTruthy();
             expect(showLow).toBeTruthy();
-
-            showMore?.click();
             showLow?.click();
+        });
+
+        it('should wire up hidden replies button in depth-only mode', () => {
+            const root = {
+                id: 'p-depth',
+                author: 'parent',
+                bodyMarkdown: 'p',
+                bodyHtml: '<p>p</p>',
+                score: 5,
+                replies: [
+                    {
+                        id: 'child',
+                        author: 'child',
+                        bodyMarkdown: 'child',
+                        bodyHtml: '<p>child</p>',
+                        score: 1,
+                        replies: [
+                            { id: 'grandchild', author: 'gc', bodyMarkdown: 'gc', bodyHtml: '<p>gc</p>', score: 2, replies: [] },
+                        ],
+                    },
+                ],
+            } as any;
+            const visibilityPlan = buildVisibilityPlan(root, {
+                depthLimit: 0,
+                smartMode: false,
+                utilityThreshold: 0.75,
+                siblingCloseDelta: 0.6,
+                maxExtraDeepVisiblePerRoot: 12,
+            }, {
+                expandedMoreIds: new Set<string>(),
+                expandedLowScoreIds: new Set<string>(),
+            });
+            const wrapper = renderCommentTree(
+                root,
+                { depthLimit: 0, visibilityPlan },
+                0,
+                false,
+            );
+
+            const buttons = Array.from(wrapper.querySelectorAll('button')) as HTMLButtonElement[];
+            const showMore = buttons.find(b => b.textContent?.includes('Show 1 hidden reply'));
+            expect(showMore).toBeTruthy();
+            showMore?.click();
+        });
+
+        it('should highlight search terms in comment body and metadata', () => {
+            const wrapper = renderCommentTree(
+                {
+                    id: 'c-hit',
+                    author: 'Alice',
+                    bodyMarkdown: 'needle body',
+                    bodyHtml: '<p>needle body</p>',
+                    score: 12,
+                    replies: [],
+                } as any,
+                {
+                    depthLimit: 5,
+                    searchActive: true,
+                    searchQuery: { author: 'alice', terms: ['needle'] },
+                    visibilityPlan: buildVisibilityPlan({
+                        id: 'c-hit',
+                        author: 'Alice',
+                        bodyMarkdown: 'needle body',
+                        bodyHtml: '<p>needle body</p>',
+                        score: 12,
+                        replies: [],
+                    } as any, {
+                        depthLimit: 5,
+                        smartMode: false,
+                        utilityThreshold: 0.75,
+                        siblingCloseDelta: 0.6,
+                        maxExtraDeepVisiblePerRoot: 12,
+                    }, {
+                        expandedMoreIds: new Set<string>(),
+                        expandedLowScoreIds: new Set<string>(),
+                    }),
+                },
+                0,
+                false,
+            );
+
+            const hits = wrapper.querySelectorAll('mark.comment-search-hit');
+            expect(hits.length).toBeGreaterThan(0);
+            const text = Array.from(hits).map(hit => hit.textContent?.toLowerCase());
+            expect(text).toContain('needle');
+            expect(text).toContain('alice');
         });
 
         it('should show comment time context and permalink when thread metadata is available', () => {
@@ -694,6 +776,63 @@ describe('Reader Host Logic', () => {
 
             expect(wrapper.querySelector('.comment-collapsed')).toBeNull();
             expect(wrapper.querySelector('.comment-body')?.textContent).toContain('contains needle');
+        });
+    });
+
+    describe('footer action precedence', () => {
+        it('should prioritize loading state', () => {
+            const state = __test__.getFooterActionState({
+                hasMore: true,
+                hasResolvable: true,
+                hasMoreMarker: true,
+                limit: 100,
+                loading: true,
+            });
+            expect(state).toBe('loading');
+        });
+
+        it('should choose placeholder resolution before limit stepping', () => {
+            const state = __test__.getFooterActionState({
+                hasMore: true,
+                hasResolvable: true,
+                hasMoreMarker: true,
+                limit: 100,
+                loading: false,
+            });
+            expect(state).toBe('load_from_reddit');
+        });
+
+        it('should choose limit stepping for marker-only availability below max', () => {
+            const state = __test__.getFooterActionState({
+                hasMore: true,
+                hasResolvable: false,
+                hasMoreMarker: true,
+                limit: 300,
+                loading: false,
+            });
+            expect(state).toBe('increase_limit');
+        });
+
+        it('should offer open-reddit fallback at max limit with marker-only availability', () => {
+            const state = __test__.getFooterActionState({
+                hasMore: true,
+                hasResolvable: false,
+                hasMoreMarker: true,
+                limit: 500,
+                loading: false,
+            });
+            expect(state).toBe('open_reddit');
+        });
+
+        it('should hide footer when no availability remains', () => {
+            const state = __test__.getFooterActionState({
+                hasMore: false,
+                hasResolvable: false,
+                hasMoreMarker: false,
+                limit: 500,
+                loading: false,
+            });
+            expect(state).toBe('hidden');
         });
     });
 });

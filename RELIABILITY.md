@@ -34,6 +34,8 @@
 - Pending token timeout and cleanup behavior.
 - Cache hit/miss + eviction paths.
 - Smart curation ON/OFF parity on same tree (deterministic plan output for fixed input).
+- Search reliability: active query reveals matched branches, highlights remain visible, and no-results/match-count status text stays coherent.
+- Footer precedence reliability: load-more action reflects true availability state (placeholders, marker-only fallback, exhausted).
 - Deep expansion cap (`maxExtraDeepVisiblePerRoot`) respected under high-branch threads.
 - Negative-with-signal guard works (strong descendant branches are not auto-hidden).
 - Markdown export tree consistency: node `id`/`p`/`x`/`d` align with visible comment order and depth filtering.

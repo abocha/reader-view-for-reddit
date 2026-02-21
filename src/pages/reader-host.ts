@@ -90,6 +90,8 @@ type RenderTreeSettings = {
     depthLimit: number;
     visibilityPlan: VisibilityPlan;
     searchActive?: boolean;
+    searchQuery?: ReturnType<typeof parseCommentSearchQuery>;
+    searchHighlightTerms?: string[];
 };
 
 type CommentsBulkAction = 'expand_all' | 'collapse_all' | 'reset_view';
@@ -118,6 +120,9 @@ let currentRootMoreChildrenIds: string[] = [];
 let commentsRenderSeq = 0;
 let commentsDeepLoadSeq = 0;
 let activeDeepLoadParentId: string | null = null;
+let hasActiveSearchStatus = false;
+let activeSearchHighlightKey = '';
+let backToTopCleanup: (() => void) | null = null;
 let deepLoadState: {
     loaded: boolean;
     scope: 'none' | 'branch' | 'root';
@@ -217,6 +222,23 @@ function parseCommentSearchQuery(raw: string): { author: string | null; terms: s
     return { author, terms };
 }
 
+type FooterActionState = 'hidden' | 'loading' | 'load_from_reddit' | 'increase_limit' | 'open_reddit';
+
+function getFooterActionState(options: {
+    hasMore: boolean;
+    hasResolvable: boolean;
+    hasMoreMarker: boolean;
+    limit: number;
+    loading: boolean;
+}): FooterActionState {
+    if (options.loading) return 'loading';
+    if (!options.hasMore) return 'hidden';
+    if (options.hasResolvable) return 'load_from_reddit';
+    if (options.hasMoreMarker && options.limit < 500) return 'increase_limit';
+    if (options.hasMoreMarker && options.limit >= 500) return 'open_reddit';
+    return 'hidden';
+}
+
 function commentMatchesSearch(comment: CommentNode, query: { author: string | null; terms: string[] }): boolean {
     const author = normalizeSearchToken(comment.author);
     if (query.author && !author.includes(query.author)) return false;
@@ -289,10 +311,15 @@ function updateCommentsFooter(options: { hasMore: boolean; limit: number; loadin
     if (!footer) return;
 
     const hasResolvable = hasResolvableMorePlaceholders();
-    const shouldShow = options.hasMore;
     const loading = Boolean(options.loading);
-    const showRedditLink = !loading && !hasResolvable && currentHasMoreMarker && options.limit >= 500;
-    footer.classList.toggle('is-hidden', !shouldShow && !loading && !showRedditLink);
+    const state = getFooterActionState({
+        hasMore: options.hasMore,
+        hasResolvable,
+        hasMoreMarker: currentHasMoreMarker,
+        limit: options.limit,
+        loading,
+    });
+    footer.classList.toggle('is-hidden', state === 'hidden');
 
     let btn = footer.querySelector<HTMLButtonElement>('button[data-role="load-more-comments"]');
     if (!btn) {
@@ -304,22 +331,22 @@ function updateCommentsFooter(options: { hasMore: boolean; limit: number; loadin
     }
 
     btn.onclick = null;
-    btn.disabled = loading || (!shouldShow && !showRedditLink);
-    if (loading) {
+    btn.disabled = state === 'hidden';
+    if (state === 'loading') {
         btn.classList.add('is-busy');
         btn.setAttribute('aria-busy', 'true');
         btn.textContent = 'Loading more…';
     } else {
         btn.classList.remove('is-busy');
         btn.removeAttribute('aria-busy');
-        btn.textContent = showRedditLink
+        btn.textContent = state === 'open_reddit'
             ? 'See more comments on Reddit'
-            : hasResolvable
+            : state === 'load_from_reddit'
                 ? 'Load more from Reddit'
                 : 'Load more comments';
     }
 
-    if (showRedditLink) {
+    if (state === 'open_reddit') {
         btn.disabled = false;
         btn.onclick = (e) => {
             e.preventDefault();
@@ -331,10 +358,11 @@ function updateCommentsFooter(options: { hasMore: boolean; limit: number; loadin
         return;
     }
 
-    if (shouldShow && !loading) {
+    if (state === 'increase_limit' || state === 'load_from_reddit') {
+        btn.disabled = false;
         btn.onclick = () => {
             pendingScrollAnchor = captureCommentsScrollAnchor();
-            if (!hasResolvable && currentHasMoreMarker && options.limit < 500) {
+            if (state === 'increase_limit') {
                 const currentLimit = getCommentsLimit();
                 const limitEl = document.getElementById('comments-limit') as HTMLSelectElement | null;
                 const idx = COMMENTS_LIMIT_OPTIONS.indexOf(currentLimit as any);
@@ -346,6 +374,54 @@ function updateCommentsFooter(options: { hasMore: boolean; limit: number; loadin
             }
             void loadMoreCommentsForScope(null);
         };
+    }
+}
+
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function getSearchHighlightTerms(query: ReturnType<typeof parseCommentSearchQuery> | undefined): string[] {
+    if (!query) return [];
+    const terms: string[] = [];
+    if (query.author) terms.push(query.author.toLowerCase());
+    for (const term of query.terms) terms.push(term.toLowerCase());
+    return dedupeIds(terms.filter(Boolean));
+}
+
+function highlightSearchTerms(container: HTMLElement, terms: string[]): void {
+    if (terms.length === 0) return;
+    const pattern = new RegExp(`(${terms.map(term => escapeRegExp(term)).join('|')})`, 'ig');
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+    const nodes: Text[] = [];
+    let node: Node | null;
+    while ((node = walker.nextNode())) {
+        if (!(node instanceof Text)) continue;
+        if (!node.nodeValue || !node.nodeValue.trim()) continue;
+        nodes.push(node);
+    }
+
+    for (const textNode of nodes) {
+        const text = textNode.nodeValue || '';
+        pattern.lastIndex = 0;
+        if (!pattern.test(text)) continue;
+
+        const frag = document.createDocumentFragment();
+        let lastIndex = 0;
+        pattern.lastIndex = 0;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(text)) !== null) {
+            const index = match.index;
+            const matched = match[0] || '';
+            if (index > lastIndex) frag.appendChild(document.createTextNode(text.slice(lastIndex, index)));
+            const mark = document.createElement('mark');
+            mark.className = 'comment-search-hit';
+            mark.textContent = matched;
+            frag.appendChild(mark);
+            lastIndex = index + matched.length;
+        }
+        if (lastIndex < text.length) frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+        textNode.replaceWith(frag);
     }
 }
 
@@ -416,6 +492,7 @@ async function init() {
     }
     const sort = params.get('sort');
     if (sort) benchmarkSortOverride = sort;
+    setupBackToTopButton();
 
     // Initial check for 'preferencesInitialized' logic (handled in initPreferences safely now)
 
@@ -1107,6 +1184,51 @@ function setupResponsiveSpacing() {
     mediaBottomBar.addEventListener('change', update);
 }
 
+function setupBackToTopButton() {
+    const btn = document.getElementById('back-to-top-btn') as HTMLButtonElement | null;
+    if (!btn) return;
+
+    backToTopCleanup?.();
+    backToTopCleanup = null;
+
+    const showAfterPx = 380;
+    let rafId = 0;
+
+    const updateVisibility = () => {
+        rafId = 0;
+        const visible = window.scrollY > showAfterPx;
+        btn.classList.toggle('is-visible', visible);
+        btn.setAttribute('aria-hidden', visible ? 'false' : 'true');
+        btn.tabIndex = visible ? 0 : -1;
+    };
+
+    const requestVisibilityUpdate = () => {
+        if (rafId !== 0) return;
+        rafId = window.requestAnimationFrame(updateVisibility);
+    };
+
+    const onClick = () => {
+        const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        window.scrollTo({
+            top: 0,
+            left: 0,
+            behavior: reduceMotion ? 'auto' : 'smooth',
+        });
+    };
+
+    btn.addEventListener('click', onClick);
+    window.addEventListener('scroll', requestVisibilityUpdate, { passive: true });
+    window.addEventListener('resize', requestVisibilityUpdate, { passive: true });
+    requestVisibilityUpdate();
+
+    backToTopCleanup = () => {
+        btn.removeEventListener('click', onClick);
+        window.removeEventListener('scroll', requestVisibilityUpdate);
+        window.removeEventListener('resize', requestVisibilityUpdate);
+        if (rafId !== 0) window.cancelAnimationFrame(rafId);
+    };
+}
+
 export function initCommentsUI() {
     const toggleSwitch = document.getElementById('toggle-comments-switch') as HTMLInputElement | null;
     // Reload logic merged into config changes
@@ -1718,6 +1840,7 @@ async function loadComments(options: LoadCommentsOptions = {}) {
 
     if (!commentsVisible) return;
     commentsSection.hidden = false;
+    hasActiveSearchStatus = false;
     setCommentsStatus(statusEl, 'loading', 'Loading comments…');
     if (limitEl) limitEl.disabled = true;
     if (sortEl) sortEl.disabled = true;
@@ -2183,6 +2306,7 @@ async function loadMoreCommentsForScope(parentId: string | null): Promise<void> 
         errors: [],
     };
 
+    hasActiveSearchStatus = false;
     setCommentsStatus(statusEl, 'loading', parentId ? 'Loading more replies…' : 'Loading more comments…');
     updateCommentsFooter({ hasMore: currentCommentsHasMore, limit, loading: true, permalink: currentPost?.permalink });
     rerenderComments();
@@ -2259,6 +2383,7 @@ async function loadMoreCommentsForScope(parentId: string | null): Promise<void> 
 
 function rerenderComments() {
     const listEl = document.getElementById('comments-list') as HTMLElement | null;
+    const statusEl = document.getElementById('comments-status') as HTMLElement | null;
     if (!listEl) return;
 
     const renderSeq = ++commentsRenderSeq;
@@ -2266,6 +2391,13 @@ function rerenderComments() {
 
     const searchQuery = getCommentsSearchQuery();
     const searchActive = searchQuery.length > 0;
+    const parsedSearchQuery = searchActive ? parseCommentSearchQuery(searchQuery) : undefined;
+    const searchHighlightTerms = getSearchHighlightTerms(parsedSearchQuery);
+    const searchHighlightKey = searchHighlightTerms.join('\u001f');
+    if (commentsRenderer && searchHighlightKey !== activeSearchHighlightKey) {
+        commentsRenderer.invalidate();
+    }
+    activeSearchHighlightKey = searchHighlightKey;
     const filteredRoots = filterCommentsBySearch(currentComments, searchQuery);
     if (searchQuery && filteredRoots.length === 0) {
         commentsRenderer?.invalidate();
@@ -2274,8 +2406,26 @@ function rerenderComments() {
         empty.className = 'comment-collapsed';
         empty.textContent = `No comments match "${searchQuery}".`;
         listEl.appendChild(empty);
+        if (statusEl && !commentsAbort && activeDeepLoadParentId === null) {
+            setCommentsStatus(statusEl, 'info', `No comments match "${searchQuery}".`);
+            hasActiveSearchStatus = true;
+        }
         restoreCommentFocus();
         return;
+    }
+
+    if (searchActive && statusEl && !commentsAbort && activeDeepLoadParentId === null) {
+        const matchCount = countLoadedComments(filteredRoots);
+        const threadCount = filteredRoots.length;
+        setCommentsStatus(
+            statusEl,
+            'info',
+            `Found ${matchCount} matching comment${matchCount === 1 ? '' : 's'} in ${threadCount} thread${threadCount === 1 ? '' : 's'}.`,
+        );
+        hasActiveSearchStatus = true;
+    } else if (!searchActive && hasActiveSearchStatus && statusEl && !commentsAbort && activeDeepLoadParentId === null) {
+        setCommentsStatus(statusEl, 'success', formatCommentsLoadedMessage(countLoadedComments(currentComments)));
+        hasActiveSearchStatus = false;
     }
 
     const depth = getCommentsDepth();
@@ -2293,7 +2443,13 @@ function rerenderComments() {
         const visibilityPlan = buildVisibilityPlan(top, policy, viewState);
         return {
             top,
-            settings: { depthLimit: depth, visibilityPlan, searchActive } as RenderTreeSettings,
+            settings: {
+                depthLimit: depth,
+                visibilityPlan,
+                searchActive,
+                searchQuery: parsedSearchQuery,
+                searchHighlightTerms,
+            } as RenderTreeSettings,
         };
     });
 
@@ -2381,6 +2537,7 @@ export function renderCommentTree(
     toggle.className = 'comment-toggle btn btn--ghost btn--sm';
     toggle.type = 'button';
     const searchActive = Boolean(settings.searchActive);
+    const highlightTerms = settings.searchHighlightTerms ?? getSearchHighlightTerms(settings.searchQuery);
     const isAutoModerator = comment.author.trim().toLowerCase() === 'automoderator';
     const autoCollapsed = !searchActive && isAutoModerator && !autoModeratorExpandedById.has(comment.id);
     const isCollapsed = !searchActive && (Boolean(options?.forceCollapsed) || collapsedById.has(comment.id) || autoCollapsed);
@@ -2414,6 +2571,9 @@ export function renderCommentTree(
     const timeText = time ? ` • ${time.label}` : '';
     metaText.textContent = `u/${comment.author}${scoreText}${timeText}`;
     if (time) metaText.title = time.title;
+    if (searchActive) {
+        highlightSearchTerms(metaText, highlightTerms);
+    }
 
     meta.append(toggle, metaText);
 
@@ -2437,10 +2597,14 @@ export function renderCommentTree(
         collapsed.textContent = buildCommentSnippet(comment);
         wrapper.appendChild(collapsed);
         if (options?.lowScore) {
+            const reason = document.createElement('div');
+            reason.className = 'comment-hidden-reason';
+            reason.textContent = 'Hidden by smart curation (low score).';
+            wrapper.appendChild(reason);
             const reveal = document.createElement('button');
             reveal.className = 'action-btn btn btn--outline btn--sm';
             reveal.type = 'button';
-            reveal.textContent = 'Show low-score comment';
+            reveal.textContent = 'Show hidden low-score comment';
             reveal.addEventListener('click', () => {
                 expandedLowScoreById.add(comment.id);
                 rerenderComments();
@@ -2454,6 +2618,9 @@ export function renderCommentTree(
     body.className = 'comment-body comment-fragment-enter';
     body.id = bodyId;
     body.appendChild(sanitizeHtmlToFragment(comment.bodyHtml));
+    if (searchActive) {
+        highlightSearchTerms(body, highlightTerms);
+    }
     wrapper.appendChild(body);
 
     const unresolvedMoreCount = comment.moreChildrenIds?.length ?? 0;
@@ -2486,7 +2653,7 @@ export function renderCommentTree(
         const btn = document.createElement('button');
         btn.className = 'action-btn btn btn--outline btn--sm';
         btn.type = 'button';
-        btn.textContent = `Show ${hiddenDepthCount} more replies`;
+        btn.textContent = `Show ${hiddenDepthCount} hidden repl${hiddenDepthCount === 1 ? 'y' : 'ies'}`;
         btn.addEventListener('click', () => {
             expandedMoreById.add(comment.id);
             rerenderComments();
@@ -3307,6 +3474,8 @@ export const __test__ = {
     buildMarkdownFilename,
     buildPostAndCommentsMarkdown,
     filterCommentsBySearch,
+    getFooterActionState,
+    parseCommentSearchQuery,
     init,
     initTokenProtocol,
     isProbablyImageUrl,

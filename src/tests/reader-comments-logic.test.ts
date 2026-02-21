@@ -332,7 +332,7 @@ describe('Reader Comments Logic', () => {
     });
 
     describe('renderCommentTree visibility', () => {
-        it('shows "Show more replies" in depth-only mode', () => {
+        it('shows "Show hidden replies" in depth-only mode', () => {
             const child = createNode('child', 10, [createNode('gc', 10)]);
             const visibilityPlan = buildVisibilityPlan(child, makePolicy(0, false), emptyViewState());
 
@@ -343,7 +343,7 @@ describe('Reader Comments Logic', () => {
 
             const btn = el.querySelector('.action-btn');
             expect(btn).not.toBeNull();
-            expect(btn?.textContent).toContain('Show 1 more replies');
+            expect(btn?.textContent).toContain('Show 1 hidden reply');
         });
 
         it('shows low-score reveal in smart mode', () => {

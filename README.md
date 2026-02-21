@@ -33,6 +33,7 @@ This repository uses in-repo documentation as the system of record.
     - `ON`: expands useful deep branches and collapses hard-low-value noise.
     - `OFF`: depth-only behavior.
   - Local search supports free text and `author:<name>`.
+    - Active search force-expands matching branches, highlights matched terms, and shows a match-count status summary.
   - Bulk controls: `Expand all`, `Collapse all`, `Reset view`.
   - Deep loading supports branch/root expansion via Reddit `morechildren` with bounded safety budgets (requests/nodes/time).
   - The footer falls back to limit-step loading and “See more comments on Reddit” when placeholders are unavailable but Reddit still signals more comments.

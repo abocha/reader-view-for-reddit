@@ -262,6 +262,26 @@
     pointer-events: none;
 }
 
+.back-to-top-btn {
+    position: fixed;
+    right: max(16px, env(safe-area-inset-right));
+    bottom: calc(max(16px, env(safe-area-inset-bottom)) + var(--toolbar-offset-bottom, 0px));
+    z-index: 40;
+    opacity: 0;
+    transform: translateY(10px);
+    pointer-events: none;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.16);
+    transition:
+        opacity var(--dur-2) var(--ease-standard),
+        transform var(--dur-2) var(--ease-standard);
+}
+
+.back-to-top-btn.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
 .comment {
     margin: var(--spacing-lg) 0;
     padding-left: var(--spacing-md);
@@ -374,6 +394,20 @@
     color: var(--meta-color);
 }
 
+.comment-hidden-reason {
+    margin-top: 6px;
+    font-family: var(--ui-font-family);
+    font-size: var(--ui-font-size-sm);
+    color: color-mix(in srgb, var(--meta-color) 85%, transparent);
+}
+
+.comment-search-hit {
+    background: color-mix(in srgb, var(--accent-color) 28%, transparent);
+    color: inherit;
+    border-radius: 4px;
+    padding: 0 2px;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .rvrr-comment-root-enter,
     .rvrr-comment-root-enter.rvrr-comment-root-enter-active {
@@ -386,6 +420,11 @@
     .rvrr-comment-root-move,
     .comment-fragment-enter {
         animation: none;
+    }
+
+    .back-to-top-btn {
+        transition: none;
+        transform: none;
     }
 }
 

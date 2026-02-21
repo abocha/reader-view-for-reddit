@@ -125,4 +125,69 @@ describe('markdown download actions', () => {
             urlAny.revokeObjectURL = originalRevokeObjectURL;
         }
     });
+
+    it('keeps post+comments markdown identical between copy and download paths', async () => {
+        document.body.innerHTML = `
+            <div id="reader-toolbar"></div>
+            <main></main>
+            <div id="settings-drawer"></div>
+            <button id="toggle-drawer" type="button"></button>
+            <button id="close-drawer" type="button"></button>
+            <select id="open-mode"><option value="same-tab">Same Tab</option></select>
+            <button id="copy-post-md" type="button"></button>
+            <button id="copy-post-comments-md" type="button"></button>
+            <button id="download-post-md" type="button"></button>
+            <button id="download-post-comments-md" type="button"></button>
+            <select id="comments-limit"><option value="100" selected>100</option></select>
+            <input id="comments-depth" value="2" />
+            <input id="comments-smart-mode" type="checkbox" checked />
+            <article id="spike-article"></article>
+        `;
+
+        const writeText = vi.fn().mockResolvedValue(undefined);
+        Object.defineProperty(navigator, 'clipboard', {
+            value: { writeText },
+            configurable: true,
+        });
+
+        const urlAny = URL as any;
+        const originalCreateObjectURL = urlAny.createObjectURL;
+        const originalRevokeObjectURL = urlAny.revokeObjectURL;
+        urlAny.createObjectURL = vi.fn((_blob: Blob) => {
+            return 'blob:test';
+        });
+        urlAny.revokeObjectURL = vi.fn();
+
+        const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+        try {
+            initActions();
+            renderArticle({
+                title: 'Parity Post',
+                author: 'me',
+                subreddit: 'r/test',
+                bodyHtml: '<p>Body</p>',
+                bodyMarkdown: 'Body',
+                url: 'https://www.reddit.com/r/test/comments/abc123/parity-post/',
+                permalink: '/r/test/comments/abc123/parity-post/',
+                postId: 'abc123',
+                isFallback: false,
+            } as any);
+
+            (document.getElementById('copy-post-comments-md') as HTMLButtonElement).click();
+            await Promise.resolve();
+            const copied = String(writeText.mock.calls[0]?.[0] || '');
+
+            (document.getElementById('download-post-comments-md') as HTMLButtonElement).click();
+            await Promise.resolve();
+            const downloadedBlob = (urlAny.createObjectURL as any).mock.calls[0]?.[0] as Blob | undefined;
+            const downloaded = downloadedBlob ? await downloadedBlob.text() : '';
+
+            expect(copied.length).toBeGreaterThan(0);
+            expect(downloaded).toBe(copied);
+        } finally {
+            clickSpy.mockRestore();
+            urlAny.createObjectURL = originalCreateObjectURL;
+            urlAny.revokeObjectURL = originalRevokeObjectURL;
+        }
+    });
 });

@@ -185,7 +185,7 @@ describe('Reader UI Coverage', () => {
             expect(toast?.textContent).toContain('Copied!');
         });
 
-	        it('should include "(No comments loaded)" when copying without loaded comments', async () => {
+        it('should include "(No comments loaded)" when copying without loaded comments', async () => {
 	            const writeText = vi.fn().mockResolvedValue(undefined);
 	            Object.defineProperty(navigator, 'clipboard', {
 	                value: { writeText },
@@ -221,6 +221,13 @@ describe('Reader UI Coverage', () => {
 	            expect(text).toMatch(/- exported_at_utc: \d{10}/);
 	            expect(text).toContain('field_legend: node(id,p,x,d,a,s,t)');
 	        });
+
+        it('should parse author token and terms for search query helper', async () => {
+            const mod = await import('../pages/reader-host');
+            const parsed = mod.__test__.parseCommentSearchQuery('author:alice needle exact');
+            expect(parsed.author).toBe('alice');
+            expect(parsed.terms).toEqual(['needle', 'exact']);
+        });
 
         it('should fallback to execCommand when clipboard write fails (and include nested replies)', async () => {
             const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

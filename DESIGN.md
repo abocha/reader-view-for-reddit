@@ -35,6 +35,8 @@ Reader View for Reddit is a Firefox MV3 extension that extracts Reddit post cont
 - Reader host currently projects graph state back to nested comment trees for render/planner/export compatibility during the Phase 4 migration.
 - Deep-loading is branch/root scoped and budget-bound (`requests`, `nodes`, `time`) to keep UI responsive on typical laptops.
 - Large comment renders use chunked root rendering; structure/state correctness is preserved when jobs are superseded.
+- Search mode is non-destructive: active queries force-expand matched branches, highlight matched terms in body/meta, and emit deterministic status summaries.
+- Footer actions are governed by explicit precedence (`loading` -> `load_from_reddit` -> `increase_limit` -> `open_reddit` -> `hidden`) so impossible actions are not offered.
 - Markdown comment export structural truth is explicit node fields (`id`, `p`, `x`, `d`) in `[node ...]`; ASCII tree prefixes are visual only.
 - Markdown export records deep-loading metadata (`deep_loaded`, `deep_load_scope`, `deep_load_truncated`) for downstream agent context.
 - `README.md` is the top-level navigation point for docs.

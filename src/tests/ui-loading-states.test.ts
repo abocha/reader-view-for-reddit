@@ -37,6 +37,7 @@ describe('Loading states', () => {
                 <option value="best" selected>Best</option>
                 <option value="top">Top</option>
             </select>
+            <input id="comments-search" type="search" />
             <input id="toggle-comments-switch" type="checkbox" checked />
             <section id="comments"></section>
             <div id="comments-status"></div>
@@ -440,5 +441,181 @@ describe('Loading states', () => {
         await new Promise(r => setTimeout(r, 0));
 
         expect(section.hidden).toBe(true);
+    });
+
+    it('should clear search status after query is removed', async () => {
+        const { renderArticle, initCommentsUI } = await import('../pages/reader-host');
+        (globalThis.fetch as any) = vi.fn().mockResolvedValueOnce({
+            ok: true,
+            json: async () => [
+                { kind: 'Listing', data: { children: [{ kind: 't3', data: { num_comments: 1 } }] } },
+                {
+                    kind: 'Listing',
+                    data: {
+                        children: [
+                            {
+                                kind: 't1',
+                                data: {
+                                    id: 'c1',
+                                    author: 'tester',
+                                    body: 'alpha beta',
+                                    body_html: '<p>alpha beta</p>',
+                                    score: 3,
+                                    replies: '',
+                                },
+                            },
+                        ],
+                    },
+                },
+            ],
+        });
+
+        renderArticle({
+            title: 'Post',
+            author: 'me',
+            subreddit: 'r/test',
+            bodyHtml: '',
+            bodyMarkdown: 'md',
+            url: 'http://test.com',
+            isFallback: false,
+            permalink: '/r/test/comments/123/post',
+            postId: '123',
+        } as any);
+
+        initCommentsUI();
+        await new Promise(r => setTimeout(r, 0));
+        await new Promise(r => setTimeout(r, 0));
+
+        const search = document.getElementById('comments-search') as HTMLInputElement;
+        const status = document.getElementById('comments-status') as HTMLElement;
+
+        search.value = 'alpha';
+        search.dispatchEvent(new Event('input'));
+        await new Promise(r => setTimeout(r, 0));
+        expect(status.textContent).toContain('Found 1 matching comment in 1 thread.');
+
+        search.value = '';
+        search.dispatchEvent(new Event('input'));
+        await new Promise(r => setTimeout(r, 0));
+        expect(status.textContent).not.toContain('Found 1 matching comment');
+        expect(status.textContent).not.toContain('No comments match');
+        expect(status.textContent).toContain('Showing 1 comments.');
+    });
+
+    it('should clear no-results search status after query is removed', async () => {
+        const { renderArticle, initCommentsUI } = await import('../pages/reader-host');
+        (globalThis.fetch as any) = vi.fn().mockResolvedValueOnce({
+            ok: true,
+            json: async () => [
+                { kind: 'Listing', data: { children: [{ kind: 't3', data: { num_comments: 1 } }] } },
+                {
+                    kind: 'Listing',
+                    data: {
+                        children: [
+                            {
+                                kind: 't1',
+                                data: {
+                                    id: 'c1',
+                                    author: 'tester',
+                                    body: 'alpha beta',
+                                    body_html: '<p>alpha beta</p>',
+                                    score: 3,
+                                    replies: '',
+                                },
+                            },
+                        ],
+                    },
+                },
+            ],
+        });
+
+        renderArticle({
+            title: 'Post',
+            author: 'me',
+            subreddit: 'r/test',
+            bodyHtml: '',
+            bodyMarkdown: 'md',
+            url: 'http://test.com',
+            isFallback: false,
+            permalink: '/r/test/comments/123/post',
+            postId: '123',
+        } as any);
+
+        initCommentsUI();
+        await new Promise(r => setTimeout(r, 0));
+        await new Promise(r => setTimeout(r, 0));
+
+        const search = document.getElementById('comments-search') as HTMLInputElement;
+        const status = document.getElementById('comments-status') as HTMLElement;
+
+        search.value = 'nope';
+        search.dispatchEvent(new Event('input'));
+        await new Promise(r => setTimeout(r, 0));
+        expect(status.textContent).toContain('No comments match "nope".');
+
+        search.value = '';
+        search.dispatchEvent(new Event('input'));
+        await new Promise(r => setTimeout(r, 0));
+        expect(status.textContent).not.toContain('No comments match');
+        expect(status.textContent).toContain('Showing 1 comments.');
+    });
+
+    it('should refresh highlight marks when search query changes with same matched tree', async () => {
+        const { renderArticle, initCommentsUI } = await import('../pages/reader-host');
+        (globalThis.fetch as any) = vi.fn().mockResolvedValueOnce({
+            ok: true,
+            json: async () => [
+                { kind: 'Listing', data: { children: [{ kind: 't3', data: { num_comments: 1 } }] } },
+                {
+                    kind: 'Listing',
+                    data: {
+                        children: [
+                            {
+                                kind: 't1',
+                                data: {
+                                    id: 'c1',
+                                    author: 'tester',
+                                    body: 'alpha beta',
+                                    body_html: '<p>alpha beta</p>',
+                                    score: 3,
+                                    replies: '',
+                                },
+                            },
+                        ],
+                    },
+                },
+            ],
+        });
+
+        renderArticle({
+            title: 'Post',
+            author: 'me',
+            subreddit: 'r/test',
+            bodyHtml: '',
+            bodyMarkdown: 'md',
+            url: 'http://test.com',
+            isFallback: false,
+            permalink: '/r/test/comments/123/post',
+            postId: '123',
+        } as any);
+
+        initCommentsUI();
+        await new Promise(r => setTimeout(r, 0));
+        await new Promise(r => setTimeout(r, 0));
+
+        const search = document.getElementById('comments-search') as HTMLInputElement;
+        const listEl = document.getElementById('comments-list') as HTMLElement;
+
+        search.value = 'alpha';
+        search.dispatchEvent(new Event('input'));
+        await new Promise(r => setTimeout(r, 0));
+        expect(Array.from(listEl.querySelectorAll('mark.comment-search-hit')).some(node => node.textContent?.toLowerCase() === 'alpha')).toBe(true);
+
+        search.value = 'beta';
+        search.dispatchEvent(new Event('input'));
+        await new Promise(r => setTimeout(r, 0));
+        const hits = Array.from(listEl.querySelectorAll('mark.comment-search-hit')).map(node => (node.textContent || '').toLowerCase());
+        expect(hits).toContain('beta');
+        expect(hits).not.toContain('alpha');
     });
 });
