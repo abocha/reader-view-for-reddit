@@ -108,7 +108,7 @@ describe('Background Script Coverage', () => {
             }));
         });
 
-        it('should open error host in a new tab when configured', async () => {
+        it('should report errors to the pending host when configured for a new tab', async () => {
             const { processTab } = await import('../background/index');
             const tab = { id: 444, url: 'https://reddit.com/r/foo' } as any;
 
@@ -118,9 +118,10 @@ describe('Background Script Coverage', () => {
 
             await processTab(tab);
 
-            expect(browser.tabs.create).toHaveBeenCalledWith(expect.objectContaining({
-                url: expect.stringContaining('#mode=error'),
-                active: true,
+            expect(browser.tabs.create).toHaveBeenCalledOnce();
+            expect(browser.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+                type: 'HOST_PAYLOAD_ERROR',
+                error: 'Nope',
             }));
         });
     });
@@ -222,7 +223,10 @@ describe('Background Script Coverage', () => {
             (globalThis.fetch as any).mockResolvedValue({ ok: false, status: 500 });
 
             (browser.tabs as any).onUpdated = {
-                addListener: (fn: any) => { fn(2, { status: 'complete' }); },
+                addListener: (fn: any) => {
+                    fn(1, { status: 'complete' });
+                    fn(2, { status: 'complete' });
+                },
                 removeListener: () => { /* noop */ },
             };
 

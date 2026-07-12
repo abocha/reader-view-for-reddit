@@ -60,4 +60,20 @@ describe('session token cache', () => {
         expect(next[0].lastAccessed).toBe(Date.now());
         expect(browser.storage.session.remove).toHaveBeenCalledWith(['expired']);
     });
+
+    it('preserves both tokens when records overlap', async () => {
+        const store: Record<string, unknown> = {};
+        (browser.storage.session.get as any).mockImplementation(async (key: string) => ({ [key]: store[key] }));
+        (browser.storage.session.set as any).mockImplementation(async (value: Record<string, unknown>) => {
+            await Promise.resolve();
+            Object.assign(store, value);
+        });
+
+        await Promise.all([
+            recordSessionToken('first'),
+            recordSessionToken('second'),
+        ]);
+
+        expect((store.rvrr_tokens as any[]).map(entry => entry.token).sort()).toEqual(['first', 'second']);
+    });
 });

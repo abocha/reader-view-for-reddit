@@ -18,7 +18,7 @@ jobs:
           node-version: 22
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -31,3 +31,9 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      - name: Lint extension package
+        run: pnpm lint:extension

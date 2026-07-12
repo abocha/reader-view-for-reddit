@@ -30,7 +30,7 @@ jobs:
           node-version: 22
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -74,6 +74,9 @@ jobs:
 
       - name: Package
         run: pnpm package
+
+      - name: Lint extension package
+        run: pnpm lint:extension
 
       - name: Verify package artifact
         run: |

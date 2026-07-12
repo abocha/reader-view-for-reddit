@@ -57,8 +57,30 @@ export async function processTab(tab: Tabs.Tab) {
     const traceId = crypto.randomUUID();
     const events = [perf.event('processTab:start', { tabId: tab.id, url: tab.url })];
     debugLog('[Reader Helper] Processing tab:', tab.id, tab.url, `(trace ${traceId})`);
+    let openMode: OpenMode;
+    let pendingTraceId: string | null = null;
+    const reportFailure = async (error: string): Promise<void> => {
+        if (pendingTraceId) {
+            try {
+                await browser.runtime.sendMessage({ type: 'HOST_PAYLOAD_ERROR', traceId: pendingTraceId, error });
+            } catch {
+                // The pending host may have been closed before extraction finished.
+            }
+            return;
+        }
+        await openErrorHost(tab, error);
+    };
 
     try {
+        openMode = await getOpenMode();
+        if (openMode === 'new-tab') {
+            pendingTraceId = traceId;
+            const navSpan = perf.span('open_host_page', { openMode: 'new-tab', pending: true });
+            events.push(navSpan.startEvent);
+            await openHostPagePending(pendingTraceId, tab.url);
+            events.push(navSpan.end());
+        }
+
         // 1) Extract payload (prefer background JSON fetch; fall back to executeScript).
         let payload: any | null = null;
         let extractMethod: 'cache' | 'json' | 'executeScript' = 'json';
@@ -105,7 +127,7 @@ export async function processTab(tab: Tabs.Tab) {
                         events.push(perf.event('processTab:error', { stage: 'extract', error: result?.error || 'unknown' }));
                         events.push(extractOverall.end({ ok: false, method: 'executeScript' }));
                         void recordPerf({ traceId, scope: 'background', events, meta: { ok: false } });
-                        await openErrorHost(tab, result?.error || 'Unknown extraction error');
+                        await reportFailure(result?.error || 'Unknown extraction error');
                         return;
                     }
                     payload = result.payload;
@@ -115,7 +137,7 @@ export async function processTab(tab: Tabs.Tab) {
                     events.push(perf.event('processTab:error', { stage: 'extract', error: fallbackErr?.message || String(fallbackErr) }));
                     events.push(extractOverall.end({ ok: false, method: 'executeScript' }));
                     void recordPerf({ traceId, scope: 'background', events, meta: { ok: false } });
-                    await openErrorHost(tab, fallbackErr?.message || String(fallbackErr));
+                    await reportFailure(fallbackErr?.message || String(fallbackErr));
                     return;
                 }
             }
@@ -123,19 +145,6 @@ export async function processTab(tab: Tabs.Tab) {
 
         events.push(extractOverall.end({ ok: true, method: extractMethod }));
         debugLog('[Reader Helper] Extraction success:', payload?.title);
-
-        const openMode = await getOpenMode();
-
-        // For new-tab mode, open the host immediately so the user sees instant feedback,
-        // then hydrate it when payload is ready.
-        let pendingTraceId: string | null = null;
-        if (openMode === 'new-tab') {
-            pendingTraceId = traceId;
-            const navSpan = perf.span('open_host_page', { openMode: 'new-tab', pending: true });
-            events.push(navSpan.startEvent);
-            await openHostPagePending(pendingTraceId, tab.url);
-            events.push(navSpan.end());
-        }
 
         // 2. Generate token and persist payload + pending marker.
         const token = await storePayloadForTrace(traceId, payload, tab.url, events);
@@ -161,7 +170,7 @@ export async function processTab(tab: Tabs.Tab) {
         console.error('[Reader Helper] Error during process sequence:', err);
         events.push(perf.event('processTab:error', { stage: 'exception', error: err?.message || String(err) }));
         void recordPerf({ traceId, scope: 'background', events, meta: { ok: false } });
-        await openErrorHost(tab, err.message || String(err));
+        await reportFailure(err.message || String(err));
     }
 }
 
@@ -182,7 +191,8 @@ export async function openHostPagePending(traceId: string, sourceUrl?: string) {
     const hostUrl =
         browser.runtime.getURL('pages/reader-host.html') +
         `#pending=1&trace=${encodeURIComponent(traceId)}${sourceUrl ? `&sourceUrl=${encodeURIComponent(sourceUrl)}` : ''}`;
-    await browser.tabs.create({ url: hostUrl, active: true });
+    const hostTab = await browser.tabs.create({ url: hostUrl, active: true });
+    if (hostTab?.id) await waitForTabLoad(hostTab.id);
 }
 
 async function waitForTabLoad(tabId: number, timeoutMs = 10000): Promise<void> {
@@ -304,8 +314,8 @@ async function openErrorHost(sourceTab: Tabs.Tab, errorMsg: string) {
 // --- Listeners ---
 
 // 1. Action Click
-browser.action.onClicked.addListener((tab) => {
-    processTab(tab);
+browser.action.onClicked.addListener(async (tab) => {
+    await processTab(tab);
 });
 
 // 2. Commands (Keyboard Shortcuts)
@@ -313,7 +323,7 @@ browser.commands.onCommand.addListener(async (command) => {
     if (command === 'open-reader-view') {
         const tabs = await browser.tabs.query({ active: true, currentWindow: true });
         if (tabs.length > 0) {
-            processTab(tabs[0]);
+            await processTab(tabs[0]);
         }
         return;
     }
@@ -342,9 +352,9 @@ browser.runtime.onInstalled.addListener(async () => {
     } as any);
 });
 
-browser.menus.onClicked.addListener((info, tab) => {
+browser.menus.onClicked.addListener(async (info, tab) => {
     if (info.menuItemId === "open-reddit-reader" && tab) {
-        processTab(tab);
+        await processTab(tab);
         return;
     }
     if (info.menuItemId === "open-reddit-reader-link") {

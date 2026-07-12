@@ -1,7 +1,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import browser from 'webextension-polyfill';
-import { processTab, getOpenMode, openHostPage } from '../background/index';
+import { processTab, getOpenMode, openHostPage, openHostPagePending } from '../background/index';
 
 // Mock the extraction import if necessary, but processTab only calls keys.
 // However, processTab imports extractRedditPost. We need to spy on executeScript return value.
@@ -27,6 +27,29 @@ describe('Background Script', () => {
     });
 
     describe('processTab', () => {
+        it('should open the pending new-tab host before extraction completes', async () => {
+            const tab = { id: 100, url: 'https://www.reddit.com/r/foo/comments/pending1/test_post/' } as any;
+            let resolveFetch!: (value: unknown) => void;
+            (globalThis.fetch as any).mockReturnValue(new Promise(resolve => {
+                resolveFetch = resolve;
+            }));
+            (browser.storage.sync.get as any).mockResolvedValue({ openMode: 'new-tab' });
+            (browser.runtime.getURL as any).mockReturnValue('moz-extension://abc/pages/reader-host.html');
+
+            const processing = processTab(tab);
+            await vi.waitFor(() => expect(browser.tabs.create).toHaveBeenCalledOnce());
+            expect(globalThis.fetch).toHaveBeenCalledOnce();
+
+            resolveFetch({
+                ok: true,
+                status: 200,
+                text: async () => JSON.stringify({
+                    data: { children: [{ data: { id: 'pending1', title: 'Test', permalink: '/r/foo/comments/pending1/test_post/' } }] },
+                }),
+            });
+            await processing;
+        });
+
         it('should successfuly extract and open host page', async () => {
             const tab = { id: 101, url: 'https://www.reddit.com/r/foo/comments/abc123/test_post/' } as any;
 
@@ -98,6 +121,21 @@ describe('Background Script', () => {
                 url: expect.stringContaining('#mode=error')
             }));
         });
+
+        it('should report new-tab extraction failure in the pending host', async () => {
+            const tab = { id: 103, url: 'https://reddit.com/bad' } as any;
+            (browser.scripting.executeScript as any).mockResolvedValue([{ result: { ok: false, error: 'Not a post' } }]);
+            (browser.runtime.getURL as any).mockReturnValue('host.html');
+            (browser.storage.sync.get as any).mockResolvedValue({ openMode: 'new-tab' });
+
+            await processTab(tab);
+
+            expect(browser.tabs.create).toHaveBeenCalledOnce();
+            expect(browser.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+                type: 'HOST_PAYLOAD_ERROR',
+                error: 'Not a post',
+            }));
+        });
     });
 
     describe('openHostPage', () => {
@@ -111,6 +149,22 @@ describe('Background Script', () => {
                 active: true
             });
             expect(browser.tabs.update).not.toHaveBeenCalled();
+        });
+
+        it('should wait for a pending host tab to load before extraction can continue', async () => {
+            let onUpdated: ((tabId: number, changeInfo: { status?: string }) => void) | undefined;
+            (browser.runtime.getURL as any).mockReturnValue('host.html');
+            (browser.tabs.create as any).mockResolvedValue({ id: 104 });
+            (browser.tabs.onUpdated.addListener as any).mockImplementation((listener: typeof onUpdated) => {
+                onUpdated = listener;
+            });
+
+            const opening = openHostPagePending('trace-1', 'https://reddit.com/r/test');
+            await vi.waitFor(() => expect(browser.tabs.onUpdated.addListener).toHaveBeenCalledOnce());
+            onUpdated?.(104, { status: 'complete' });
+            await opening;
+
+            expect(browser.tabs.onUpdated.removeListener).toHaveBeenCalledOnce();
         });
     });
 });
