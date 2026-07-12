@@ -223,7 +223,10 @@ describe('Background Script Coverage', () => {
             (globalThis.fetch as any).mockResolvedValue({ ok: false, status: 500 });
 
             (browser.tabs as any).onUpdated = {
-                addListener: (fn: any) => { fn(2, { status: 'complete' }); },
+                addListener: (fn: any) => {
+                    fn(1, { status: 'complete' });
+                    fn(2, { status: 'complete' });
+                },
                 removeListener: () => { /* noop */ },
             };
 

@@ -1,7 +1,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import browser from 'webextension-polyfill';
-import { processTab, getOpenMode, openHostPage } from '../background/index';
+import { processTab, getOpenMode, openHostPage, openHostPagePending } from '../background/index';
 
 // Mock the extraction import if necessary, but processTab only calls keys.
 // However, processTab imports extractRedditPost. We need to spy on executeScript return value.
@@ -149,6 +149,22 @@ describe('Background Script', () => {
                 active: true
             });
             expect(browser.tabs.update).not.toHaveBeenCalled();
+        });
+
+        it('should wait for a pending host tab to load before extraction can continue', async () => {
+            let onUpdated: ((tabId: number, changeInfo: { status?: string }) => void) | undefined;
+            (browser.runtime.getURL as any).mockReturnValue('host.html');
+            (browser.tabs.create as any).mockResolvedValue({ id: 104 });
+            (browser.tabs.onUpdated.addListener as any).mockImplementation((listener: typeof onUpdated) => {
+                onUpdated = listener;
+            });
+
+            const opening = openHostPagePending('trace-1', 'https://reddit.com/r/test');
+            await vi.waitFor(() => expect(browser.tabs.onUpdated.addListener).toHaveBeenCalledOnce());
+            onUpdated?.(104, { status: 'complete' });
+            await opening;
+
+            expect(browser.tabs.onUpdated.removeListener).toHaveBeenCalledOnce();
         });
     });
 });

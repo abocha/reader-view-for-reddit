@@ -191,7 +191,8 @@ export async function openHostPagePending(traceId: string, sourceUrl?: string) {
     const hostUrl =
         browser.runtime.getURL('pages/reader-host.html') +
         `#pending=1&trace=${encodeURIComponent(traceId)}${sourceUrl ? `&sourceUrl=${encodeURIComponent(sourceUrl)}` : ''}`;
-    await browser.tabs.create({ url: hostUrl, active: true });
+    const hostTab = await browser.tabs.create({ url: hostUrl, active: true });
+    if (hostTab?.id) await waitForTabLoad(hostTab.id);
 }
 
 async function waitForTabLoad(tabId: number, timeoutMs = 10000): Promise<void> {
