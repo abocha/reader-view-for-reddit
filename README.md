@@ -104,14 +104,14 @@ This repo uses a build step (TypeScript + bundling), so AMO requires submitting 
 
 - OS: Linux, macOS, or Windows (any OS supported by Node.js)
 - Node.js: `22.x` (recommended; matches the default AMO reviewer environment; see `.nvmrc`)
-- pnpm: `10.x` (recommended via Corepack)
+- pnpm: `11.x` (recommended via Corepack)
 
 ### Install Tooling
 
 - Install Node.js 22: https://nodejs.org/
 - Enable/install pnpm:
   - `corepack enable`
-  - `corepack prepare pnpm@10.26.0 --activate`
+  - `corepack prepare pnpm@11.12.0 --activate`
 
 ### Reproducible Build (produces `dist/`)
 

@@ -276,6 +276,17 @@ function filterCommentsBySearch(comments: CommentNode[], rawQuery: string): Comm
         .filter((node): node is CommentNode => Boolean(node));
 }
 
+function countMatchingComments(comments: CommentNode[], rawQuery: string): number {
+    const query = parseCommentSearchQuery(rawQuery);
+    let count = 0;
+    const visit = (comment: CommentNode): void => {
+        if (commentMatchesSearch(comment, query)) count += 1;
+        for (const reply of comment.replies) visit(reply);
+    };
+    for (const comment of comments) visit(comment);
+    return count;
+}
+
 function coerceCommentsLimit(value: number | null | undefined): number {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 100;
     let best: (typeof COMMENTS_LIMIT_OPTIONS)[number] = COMMENTS_LIMIT_OPTIONS[0];
@@ -2415,7 +2426,7 @@ function rerenderComments() {
     }
 
     if (searchActive && statusEl && !commentsAbort && activeDeepLoadParentId === null) {
-        const matchCount = countLoadedComments(filteredRoots);
+        const matchCount = countMatchingComments(currentComments, searchQuery);
         const threadCount = filteredRoots.length;
         setCommentsStatus(
             statusEl,
@@ -3425,7 +3436,18 @@ function sanitizeAttributes(element: Element, tag: string) {
         if (src.startsWith('/')) {
             const resolved = new URL(src, 'https://www.reddit.com');
             element.setAttribute('src', resolved.toString());
+            return;
         }
+        let parsed = parseHttpUrl(src);
+        if (!parsed) {
+            try {
+                parsed = parseHttpUrl(new URL(src, 'https://www.reddit.com').toString());
+            } catch {
+                parsed = null;
+            }
+        }
+        if (!parsed) element.removeAttribute('src');
+        else element.setAttribute('src', parsed.toString());
     }
 }
 
@@ -3474,6 +3496,7 @@ export const __test__ = {
     buildMarkdownFilename,
     buildPostAndCommentsMarkdown,
     filterCommentsBySearch,
+    countMatchingComments,
     getFooterActionState,
     parseCommentSearchQuery,
     init,

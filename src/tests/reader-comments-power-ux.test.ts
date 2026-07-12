@@ -51,6 +51,16 @@ describe('comments power UX helpers', () => {
         expect(filtered.map(comment => comment.id)).toEqual(['c1']);
     });
 
+    it('counts only comments that match instead of retained ancestor context', () => {
+        const tree = [
+            makeComment('c1', 'alice', 'parent text', [
+                makeComment('c2', 'bob', 'needle value'),
+            ]),
+        ];
+
+        expect((__test__ as any).countMatchingComments(tree, 'needle')).toBe(1);
+    });
+
     it('applies expand/collapse/reset bulk actions', () => {
         const tree = [
             makeComment('c1', 'alice', 'root', [makeComment('c2', 'bob', 'child')]),

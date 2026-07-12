@@ -10,6 +10,21 @@ type SessionTokenEntry = {
 const TOKEN_INDEX_KEY = 'rvrr_tokens';
 const TOKEN_TTL_MS = 30 * 60 * 1000;
 const TOKEN_MAX_ENTRIES = 15;
+let mutationQueue: Promise<void> = Promise.resolve();
+
+const serializeMutation = async <T>(mutation: () => Promise<T>): Promise<T> => {
+    const previous = mutationQueue;
+    let release!: () => void;
+    mutationQueue = new Promise<void>(resolve => {
+        release = resolve;
+    });
+    await previous;
+    try {
+        return await mutation();
+    } finally {
+        release();
+    }
+};
 
 const sanitizeEntries = (value: unknown): SessionTokenEntry[] => {
     if (!Array.isArray(value)) return [];
@@ -50,7 +65,7 @@ async function loadEntries(): Promise<SessionTokenEntry[]> {
     return sanitizeEntries((data as any)?.[TOKEN_INDEX_KEY]);
 }
 
-export async function recordSessionToken(token: string, url?: string): Promise<void> {
+async function recordSessionTokenUnsafe(token: string, url?: string): Promise<void> {
     const now = Date.now();
     const entries = await loadEntries();
 
@@ -82,7 +97,11 @@ export async function recordSessionToken(token: string, url?: string): Promise<v
     await removeTokens([...expiredTokens, ...evicted]);
 }
 
-export async function touchSessionToken(token: string): Promise<void> {
+export async function recordSessionToken(token: string, url?: string): Promise<void> {
+    return serializeMutation(() => recordSessionTokenUnsafe(token, url));
+}
+
+async function touchSessionTokenUnsafe(token: string): Promise<void> {
     const now = Date.now();
     const entries = await loadEntries();
 
@@ -111,10 +130,18 @@ export async function touchSessionToken(token: string): Promise<void> {
     await removeTokens(expiredTokens);
 }
 
-export async function forgetSessionToken(token: string): Promise<void> {
+export async function touchSessionToken(token: string): Promise<void> {
+    return serializeMutation(() => touchSessionTokenUnsafe(token));
+}
+
+async function forgetSessionTokenUnsafe(token: string): Promise<void> {
     const entries = await loadEntries();
     const next = entries.filter(entry => entry.token !== token);
     if (next.length === entries.length) return;
     await persistEntries(next);
     await removeTokens([token]);
+}
+
+export async function forgetSessionToken(token: string): Promise<void> {
+    return serializeMutation(() => forgetSessionTokenUnsafe(token));
 }

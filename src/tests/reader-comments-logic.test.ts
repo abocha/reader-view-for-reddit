@@ -329,6 +329,14 @@ describe('Reader Comments Logic', () => {
             expect(a?.href).toBe('https://www.reddit.com/r/foo');
             expect(a?.target).toBe('_blank');
         });
+
+        it('should remove non-http image sources', () => {
+            const html = '<img src="data:image/svg+xml,unsafe"><img src="file:///tmp/private">';
+            const frag = sanitizeHtmlToFragment(html);
+            const div = document.createElement('div');
+            div.appendChild(frag);
+            expect(Array.from(div.querySelectorAll('img')).every(img => !img.hasAttribute('src'))).toBe(true);
+        });
     });
 
     describe('renderCommentTree visibility', () => {

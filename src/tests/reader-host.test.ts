@@ -56,7 +56,7 @@ describe('Reader Host Logic', () => {
             div.appendChild(fragment);
 
             expect(div.querySelectorAll('img').length).toBe(1);
-            expect(div.querySelector('img')?.getAttribute('src')).toBe('test.jpg');
+            expect(div.querySelector('img')?.getAttribute('src')).toBe('https://www.reddit.com/test.jpg');
         });
 
         it('should allow table tags', () => {
@@ -88,7 +88,7 @@ describe('Reader Host Logic', () => {
 
             const img = div.querySelector('img');
             expect(img).toBeTruthy();
-            expect(img?.getAttribute('src')).toBe('test.jpg');
+            expect(img?.getAttribute('src')).toBe('https://www.reddit.com/test.jpg');
             expect(img?.getAttribute('loading')).toBe('lazy');
             expect(img?.hasAttribute('style')).toBe(false);
             expect(img?.hasAttribute('data-x')).toBe(false);
